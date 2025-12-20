@@ -1,0 +1,105 @@
+1. OCR/Parsing Agent	: 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
+2. NER/Skills Agent	
+3. Embedding Agent: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
+from openai import OpenAI
+
+client = OpenAI(
+  base_url = "https://integrate.api.nvidia.com/v1",
+  api_key = "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"
+)
+
+completion = client.chat.completions.create(
+  model="meta/llama-3.1-405b-instruct",
+  messages=[{"role":"user","content":""}],
+  temperature=0.2,
+  top_p=0.7,
+  max_tokens=1024,
+  stream=True
+)
+
+for chunk in completion:
+  if chunk.choices[0].delta.content is not None:
+    print(chunk.choices[0].delta.content, end="")
+
+
+
+
+	
+4. Scoring Agent	
+5. RAG Chatbot	:
+
+import requests, base64
+
+invoke_url = "https://integrate.api.nvidia.com/v1/chat/completions"
+stream = True
+
+
+headers = {
+  "Authorization": "Bearer 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",
+  "Accept": "text/event-stream" if stream else "application/json"
+}
+
+payload = {
+  "model": "mistralai/mistral-large-3-675b-instruct-2512",
+  "messages": [{"role":"user","content":""}],
+  "max_tokens": 2048,
+  "temperature": 0.15,
+  "top_p": 1.00,
+  "frequency_penalty": 0.00,
+  "presence_penalty": 0.00,
+  "stream": stream
+}
+
+
+
+response = requests.post(invoke_url, headers=headers, json=payload)
+
+if stream:
+    for line in response.iter_lines():
+        if line:
+            print(line.decode("utf-8"))
+else:
+    print(response.json())
+
+
+
+
+6. Email Agent
+OpenAI api : insted we can use this :from openai import OpenAI
+
+client = OpenAI(
+  base_url = "https://integrate.api.nvidia.com/v1",
+  api_key = "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"
+)
+
+completion = client.chat.completions.create(
+  model="qwen/qwen3-coder-480b-a35b-instruct",
+  messages=[{"role":"user","content":""}],
+  temperature=0.7,
+  top_p=0.8,
+  max_tokens=4096,
+  stream=True
+)
+
+for chunk in completion:
+  if chunk.choices[0].delta.content is not None:
+    print(chunk.choices[0].delta.content, end="")
+
+
+
+RESEND_API_KEY:re_GUSLhdYp_BNSiX1GVSpszsFhVdipu5QR3
+
+import resend
+
+resend.api_key = "re_GUSLhdYp_BNSiX1GVSpszsFhVdipu5QR3"
+
+r = resend.Emails.send({
+  "from": "onboarding@resend.dev",
+  "to": "nirajdas6664521@gmail.com",
+  "subject": "Hello World",
+  "html": "<p>Congrats on sending your <strong>first email</strong>!</p>"
+})
+
+
+
+anything esle you need ?

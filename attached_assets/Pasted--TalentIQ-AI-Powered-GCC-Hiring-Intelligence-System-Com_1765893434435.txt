@@ -1,0 +1,2441 @@
+# TalentIQ: AI-Powered GCC Hiring Intelligence System
+## Complete Architecture & Implementation Guide
+
+---
+
+## 🎯 SYSTEM OVERVIEW
+
+### Vision
+Transform GCC hiring from a manual, spreadsheet-driven process into an intelligent, AI-powered ecosystem that reduces screening time from hours to minutes while improving candidate quality and experience.
+
+### Core Problem Being Solved
+- **Current State**: Recruiters manually screen 100+ resumes, spending 5-10 seconds each, using keyword matching
+- **Pain Points**: 
+  - 5+ hours per job requisition
+  - Good candidates missed due to resume format
+  - Subjective, inconsistent decisions
+  - No explainability for rankings
+  - Poor candidate experience (black hole effect)
+- **Target State**: AI-assisted intelligent screening with explainable rankings in under 5 minutes
+
+### Success Metrics
+- Time Reduction: 5 hours → 5 minutes (95% reduction)
+- Accuracy: 80%+ overlap with expert recruiter picks
+- Candidate Experience: Real-time status visibility
+- Explainability: Clear reasoning for every ranking decision
+
+---
+
+## 🏗️ SYSTEM ARCHITECTURE
+
+### High-Level Components
+
+```
+┌─────────────────────────────────────────────────┐
+│          PRESENTATION LAYER                     │
+│  ┌──────────────┐  ┌──────────────────────┐   │
+│  │   Web UI     │  │   Chatbot Interface  │   │
+│  │  (React)     │  │   (Conversational)   │   │
+│  └──────────────┘  └──────────────────────┘   │
+└─────────────────┬───────────────────────────────┘
+                  │
+┌─────────────────▼───────────────────────────────┐
+│          APPLICATION LAYER                      │
+│  ┌──────────────────────────────────────────┐  │
+│  │       FastAPI Backend                    │  │
+│  │  - Resume Upload & Processing            │  │
+│  │  - Job Description Management            │  │
+│  │  - Candidate Ranking Engine              │  │
+│  │  - Chat Query Handler                    │  │
+│  │  - Multi-tenant Management               │  │
+│  └──────────────────────────────────────────┘  │
+└─────────────────┬───────────────────────────────┘
+                  │
+┌─────────────────▼───────────────────────────────┐
+│          INTELLIGENCE LAYER                     │
+│  ┌─────────────┐  ┌─────────────┐  ┌────────┐ │
+│  │   Resume    │  │  Semantic   │  │ Ranking│ │
+│  │   Parser    │  │  Matcher    │  │ Engine │ │
+│  │  (spaCy)    │  │(Transformers)│ │(Custom)│ │
+│  └─────────────┘  └─────────────┘  └────────┘ │
+│  ┌─────────────┐  ┌─────────────┐  ┌────────┐ │
+│  │   Skill     │  │Explainability│ │  LLM   │ │
+│  │ Extractor   │  │   Engine     │  │Chatbot │ │
+│  │   (NER)     │  │   (Custom)   │  │(GPT)   │ │
+│  └─────────────┘  └─────────────┘  └────────┘ │
+└─────────────────┬───────────────────────────────┘
+                  │
+┌─────────────────▼───────────────────────────────┐
+│          DATA LAYER                             │
+│  ┌──────────────────┐  ┌────────────────────┐  │
+│  │   PostgreSQL     │  │   Vector Store     │  │
+│  │ (Structured Data)│  │   (Embeddings)     │  │
+│  └──────────────────┘  └────────────────────┘  │
+└─────────────────────────────────────────────────┘
+```
+
+---
+
+## 💾 DATABASE SCHEMA
+
+### Design Principles
+- Multi-tenant isolation (tenant_id in all tables)
+- Audit trail (created_at, updated_at, created_by)
+- Soft deletes (deleted_at)
+- Indexing for performance on frequently queried fields
+
+### Tables
+
+#### 1. `tenants`
+```sql
+CREATE TABLE tenants (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL,
+    domain VARCHAR(255) UNIQUE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    is_active BOOLEAN DEFAULT TRUE
+);
+```
+
+#### 2. `users`
+```sql
+CREATE TABLE users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID REFERENCES tenants(id),
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    full_name VARCHAR(255),
+    role VARCHAR(50), -- 'recruiter', 'hiring_manager', 'admin'
+    created_at TIMESTAMP DEFAULT NOW(),
+    last_login TIMESTAMP
+);
+```
+
+#### 3. `job_descriptions`
+```sql
+CREATE TABLE job_descriptions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID REFERENCES tenants(id),
+    created_by UUID REFERENCES users(id),
+    title VARCHAR(255) NOT NULL,
+    department VARCHAR(100),
+    location VARCHAR(100),
+    experience_required VARCHAR(50), -- '3-5 years', '5+ years'
+    raw_text TEXT NOT NULL, -- Original JD
+    parsed_requirements JSONB, -- {'skills': [], 'education': [], 'must_have': []}
+    embedding VECTOR(384), -- For semantic search
+    status VARCHAR(50) DEFAULT 'active', -- 'active', 'closed', 'on_hold'
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_jd_tenant ON job_descriptions(tenant_id);
+CREATE INDEX idx_jd_status ON job_descriptions(status);
+```
+
+#### 4. `resumes`
+```sql
+CREATE TABLE resumes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID REFERENCES tenants(id),
+    job_description_id UUID REFERENCES job_descriptions(id),
+    
+    -- Candidate Information
+    candidate_name VARCHAR(255),
+    candidate_email VARCHAR(255),
+    candidate_phone VARCHAR(50),
+    
+    -- Resume Content
+    file_path VARCHAR(500), -- S3/local path to original file
+    file_type VARCHAR(20), -- 'pdf', 'docx'
+    raw_text TEXT, -- Extracted text
+    
+    -- Parsed Information (JSON for flexibility)
+    parsed_data JSONB, -- Structured extraction result
+    /*
+    {
+        "contact": {"email": "", "phone": "", "linkedin": ""},
+        "education": [{"degree": "", "institution": "", "year": ""}],
+        "experience": [
+            {
+                "company": "",
+                "role": "",
+                "duration": "",
+                "description": "",
+                "years": 3.5
+            }
+        ],
+        "skills": {
+            "technical": ["Python", "AWS"],
+            "soft": ["Leadership"],
+            "certifications": ["AWS Certified"]
+        },
+        "total_experience_years": 5.5,
+        "notice_period": "30 days"
+    }
+    */
+    
+    embedding VECTOR(384), -- Resume semantic embedding
+    
+    -- Metadata
+    uploaded_at TIMESTAMP DEFAULT NOW(),
+    processed_at TIMESTAMP,
+    processing_status VARCHAR(50) DEFAULT 'pending', -- 'pending', 'processed', 'failed'
+    processing_error TEXT
+);
+
+CREATE INDEX idx_resume_tenant ON resumes(tenant_id);
+CREATE INDEX idx_resume_jd ON resumes(job_description_id);
+CREATE INDEX idx_resume_email ON resumes(candidate_email);
+```
+
+#### 5. `candidate_rankings`
+```sql
+CREATE TABLE candidate_rankings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID REFERENCES tenants(id),
+    resume_id UUID REFERENCES resumes(id),
+    job_description_id UUID REFERENCES job_descriptions(id),
+    
+    -- Scoring Components
+    semantic_similarity_score FLOAT, -- 0-1 from embeddings
+    skill_match_score FLOAT, -- 0-1 based on skill overlap
+    experience_match_score FLOAT, -- 0-1 based on years & relevance
+    education_match_score FLOAT, -- 0-1 based on degree requirements
+    
+    -- Final Weighted Score
+    final_score FLOAT, -- Weighted combination
+    rank INTEGER, -- Ranking position for this JD
+    
+    -- Explainability
+    explanation JSONB,
+    /*
+    {
+        "matched_skills": ["Python", "AWS", "Docker"],
+        "missing_skills": ["React"],
+        "experience_summary": "5 years relevant experience in backend",
+        "strengths": ["Strong ML background", "Leadership experience"],
+        "concerns": ["No frontend experience", "Frequent job changes"],
+        "recommendation": "Strong candidate - proceed to interview"
+    }
+    */
+    
+    -- Red Flags Detection
+    red_flags JSONB, -- ['frequent_job_hopping', 'employment_gaps']
+    
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    
+    UNIQUE(resume_id, job_description_id)
+);
+
+CREATE INDEX idx_ranking_jd ON candidate_rankings(job_description_id, final_score DESC);
+CREATE INDEX idx_ranking_tenant ON candidate_rankings(tenant_id);
+```
+
+#### 6. `chat_conversations`
+```sql
+CREATE TABLE chat_conversations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID REFERENCES tenants(id),
+    user_id UUID REFERENCES users(id),
+    job_description_id UUID REFERENCES job_descriptions(id),
+    
+    query TEXT NOT NULL, -- User's question
+    intent VARCHAR(100), -- 'filter_candidates', 'explain_ranking', 'show_top_n'
+    extracted_params JSONB, -- Parameters extracted from query
+    
+    response TEXT NOT NULL, -- System response
+    results_returned JSONB, -- Actual candidate data returned
+    
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_chat_user ON chat_conversations(user_id, created_at DESC);
+```
+
+#### 7. `audit_logs`
+```sql
+CREATE TABLE audit_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID REFERENCES tenants(id),
+    user_id UUID REFERENCES users(id),
+    action VARCHAR(100), -- 'resume_uploaded', 'ranking_viewed', 'candidate_shortlisted'
+    resource_type VARCHAR(50), -- 'resume', 'job_description'
+    resource_id UUID,
+    metadata JSONB,
+    ip_address INET,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_audit_tenant ON audit_logs(tenant_id, created_at DESC);
+```
+
+---
+
+## 🤖 AI/ML INTELLIGENCE LAYER
+
+### Core AI Components
+
+#### 1. Resume Parser
+**Purpose**: Extract structured information from unstructured resume PDFs/DOCX
+
+**Technology Stack**:
+- **PyPDF2** / **pdfplumber**: PDF text extraction
+- **python-docx**: DOCX text extraction
+- **spaCy** (en_core_web_lg): NER and linguistic analysis
+- **regex patterns**: Contact info, dates, years
+
+**Implementation Logic**:
+```python
+class ResumeParser:
+    def __init__(self):
+        self.nlp = spacy.load("en_core_web_lg")
+        
+    def parse(self, file_path: str) -> dict:
+        # Step 1: Extract raw text
+        raw_text = self.extract_text(file_path)
+        
+        # Step 2: Extract contact information
+        contact = self.extract_contact_info(raw_text)
+        
+        # Step 3: Extract education
+        education = self.extract_education(raw_text)
+        
+        # Step 4: Extract experience
+        experience = self.extract_experience(raw_text)
+        
+        # Step 5: Extract skills
+        skills = self.extract_skills(raw_text)
+        
+        # Step 6: Calculate total experience
+        total_years = self.calculate_total_experience(experience)
+        
+        return {
+            "raw_text": raw_text,
+            "contact": contact,
+            "education": education,
+            "experience": experience,
+            "skills": skills,
+            "total_experience_years": total_years
+        }
+    
+    def extract_skills(self, text: str) -> dict:
+        # Use spaCy NER + custom skill dictionary
+        doc = self.nlp(text)
+        
+        # Predefined skill categories
+        TECHNICAL_SKILLS = {
+            'languages': ['Python', 'Java', 'JavaScript', 'Go', 'Rust'],
+            'frameworks': ['React', 'Django', 'FastAPI', 'Spring'],
+            'cloud': ['AWS', 'Azure', 'GCP'],
+            'databases': ['PostgreSQL', 'MongoDB', 'Redis'],
+            'tools': ['Docker', 'Kubernetes', 'Git']
+        }
+        
+        found_skills = {
+            'technical': [],
+            'soft': [],
+            'certifications': []
+        }
+        
+        # Match against skill dictionary
+        text_lower = text.lower()
+        for category, skills in TECHNICAL_SKILLS.items():
+            for skill in skills:
+                if skill.lower() in text_lower:
+                    found_skills['technical'].append(skill)
+        
+        # Extract certifications (usually in format: "AWS Certified", "Certified X")
+        cert_pattern = r'(?:certified|certification)\s+[\w\s]+|[\w\s]+\s+certified'
+        certifications = re.findall(cert_pattern, text, re.IGNORECASE)
+        found_skills['certifications'] = list(set(certifications))
+        
+        return found_skills
+```
+
+**Key Extraction Patterns**:
+- **Email**: `r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'`
+- **Phone**: `r'(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}'`
+- **Experience Years**: Look for patterns like "2019 - Present", "3 years", "Jun 2020 - Dec 2022"
+- **Skills Section**: Identify headers like "Skills", "Technical Skills", "Core Competencies"
+
+---
+
+#### 2. Semantic Matching Engine
+**Purpose**: Go beyond keyword matching to understand semantic similarity between JD and resume
+
+**Technology**: 
+- **sentence-transformers**: `all-MiniLM-L6-v2` (384-dimensional embeddings)
+- **cosine similarity**: Measure semantic closeness
+
+**Why This Model**:
+- Fast inference (~5ms per text)
+- Good balance between accuracy and speed
+- Pre-trained on large text corpus
+- Works well for job-related text
+
+**Implementation Logic**:
+```python
+from sentence_transformers import SentenceTransformer
+import numpy as np
+
+class SemanticMatcher:
+    def __init__(self):
+        self.model = SentenceTransformer('all-MiniLM-L6-v2')
+        
+    def encode_text(self, text: str) -> np.ndarray:
+        """Convert text to 384-dimensional embedding"""
+        return self.model.encode(text, convert_to_tensor=False)
+    
+    def calculate_similarity(self, text1: str, text2: str) -> float:
+        """Calculate cosine similarity between two texts"""
+        emb1 = self.encode_text(text1)
+        emb2 = self.encode_text(text2)
+        
+        # Cosine similarity
+        similarity = np.dot(emb1, emb2) / (np.linalg.norm(emb1) * np.linalg.norm(emb2))
+        return float(similarity)
+    
+    def match_resume_to_jd(self, resume_text: str, jd_text: str) -> dict:
+        """
+        Multi-level semantic matching:
+        1. Overall text similarity
+        2. Skills section similarity
+        3. Experience section similarity
+        """
+        
+        # Overall similarity
+        overall_sim = self.calculate_similarity(resume_text, jd_text)
+        
+        # Extract and compare specific sections
+        resume_skills = extract_skills_section(resume_text)
+        jd_requirements = extract_requirements_section(jd_text)
+        
+        skills_sim = self.calculate_similarity(resume_skills, jd_requirements)
+        
+        return {
+            'overall_similarity': overall_sim,
+            'skills_similarity': skills_sim,
+            'weighted_score': (overall_sim * 0.4) + (skills_sim * 0.6)
+        }
+```
+
+**Semantic Matching vs Keyword Matching**:
+```
+Keyword Matching:
+JD: "Looking for React developer"
+Resume: "Experienced in ReactJS and React Native" ✓
+Resume: "Frontend expert with Vue.js and Angular" ✗
+
+Semantic Matching:
+JD: "Looking for React developer"
+Resume: "Experienced in ReactJS and React Native" ✓ (0.95 similarity)
+Resume: "Frontend expert with Vue.js and Angular" ✓ (0.78 similarity - still relevant!)
+```
+
+---
+
+#### 3. Intelligent Ranking Engine
+**Purpose**: Combine multiple signals to produce explainable, fair rankings
+
+**Scoring Components**:
+
+1. **Semantic Similarity Score (40% weight)**
+   - Embedding-based JD-resume match
+   - Range: 0-1
+
+2. **Skill Match Score (25% weight)**
+   ```python
+   def calculate_skill_match(resume_skills: list, jd_required_skills: list) -> float:
+       matched = set(resume_skills) & set(jd_required_skills)
+       total_required = len(jd_required_skills)
+       
+       if total_required == 0:
+           return 0.5  # neutral score
+       
+       match_ratio = len(matched) / total_required
+       
+       # Bonus for additional relevant skills
+       extra_skills = set(resume_skills) - set(jd_required_skills)
+       bonus = min(len(extra_skills) * 0.05, 0.2)  # Max 20% bonus
+       
+       return min(match_ratio + bonus, 1.0)
+   ```
+
+3. **Experience Match Score (25% weight)**
+   ```python
+   def calculate_experience_match(resume_years: float, jd_requirement: str) -> float:
+       # Parse JD requirement: "3-5 years", "5+ years", "2 years"
+       required_min, required_max = parse_experience_requirement(jd_requirement)
+       
+       if required_min <= resume_years <= required_max:
+           return 1.0  # Perfect match
+       elif resume_years < required_min:
+           # Under-qualified
+           gap = required_min - resume_years
+           return max(0.5 - (gap * 0.1), 0)
+       else:
+           # Over-qualified (slight penalty)
+           excess = resume_years - required_max
+           return max(1.0 - (excess * 0.05), 0.7)
+   ```
+
+4. **Education Match Score (10% weight)**
+   ```python
+   def calculate_education_match(resume_education: list, jd_requirement: str) -> float:
+       DEGREE_HIERARCHY = {
+           'phd': 4, 'doctorate': 4,
+           'masters': 3, 'mba': 3,
+           'bachelors': 2, 'btech': 2, 'be': 2,
+           'diploma': 1
+       }
+       
+       resume_level = max([DEGREE_HIERARCHY.get(edu.lower(), 0) for edu in resume_education])
+       required_level = DEGREE_HIERARCHY.get(jd_requirement.lower(), 2)
+       
+       if resume_level >= required_level:
+           return 1.0
+       else:
+           return resume_level / required_level
+   ```
+
+**Final Score Calculation**:
+```python
+def calculate_final_score(resume: dict, jd: dict, ranking_components: dict) -> float:
+    weights = {
+        'semantic': 0.40,
+        'skills': 0.25,
+        'experience': 0.25,
+        'education': 0.10
+    }
+    
+    final_score = (
+        ranking_components['semantic_similarity_score'] * weights['semantic'] +
+        ranking_components['skill_match_score'] * weights['skills'] +
+        ranking_components['experience_match_score'] * weights['experience'] +
+        ranking_components['education_match_score'] * weights['education']
+    )
+    
+    # Apply red flag penalties
+    if ranking_components.get('red_flags'):
+        penalty = len(ranking_components['red_flags']) * 0.05
+        final_score = max(final_score - penalty, 0)
+    
+    return round(final_score, 3)
+```
+
+---
+
+#### 4. Explainability Engine
+**Purpose**: Generate human-readable explanations for why a candidate was ranked in a specific position
+
+**Implementation**:
+```python
+def generate_explanation(resume: dict, jd: dict, scores: dict) -> dict:
+    explanation = {
+        'matched_skills': [],
+        'missing_skills': [],
+        'experience_summary': '',
+        'strengths': [],
+        'concerns': [],
+        'recommendation': ''
+    }
+    
+    # Skill analysis
+    resume_skills = set(resume['parsed_data']['skills']['technical'])
+    jd_skills = set(jd['parsed_requirements']['required_skills'])
+    
+    explanation['matched_skills'] = list(resume_skills & jd_skills)
+    explanation['missing_skills'] = list(jd_skills - resume_skills)
+    
+    # Experience summary
+    total_years = resume['parsed_data']['total_experience_years']
+    relevant_exp = find_relevant_experience(resume, jd)
+    explanation['experience_summary'] = f"{total_years} years total, {relevant_exp} years relevant"
+    
+    # Strengths identification
+    if scores['skill_match_score'] > 0.8:
+        explanation['strengths'].append("Excellent skill match")
+    if total_years > parse_min_experience(jd):
+        explanation['strengths'].append("Exceeds experience requirements")
+    if resume['parsed_data']['skills']['certifications']:
+        explanation['strengths'].append(f"Certified: {', '.join(resume['parsed_data']['skills']['certifications'])}")
+    
+    # Concerns identification
+    if scores['skill_match_score'] < 0.5:
+        explanation['concerns'].append("Several required skills missing")
+    if has_employment_gaps(resume):
+        explanation['concerns'].append("Employment gaps detected")
+    if has_frequent_job_changes(resume):
+        explanation['concerns'].append("Frequent job changes (4+ companies in 2 years)")
+    
+    # Recommendation
+    if scores['final_score'] > 0.75:
+        explanation['recommendation'] = "Strong candidate - proceed to interview immediately"
+    elif scores['final_score'] > 0.6:
+        explanation['recommendation'] = "Good candidate - consider for interview"
+    elif scores['final_score'] > 0.4:
+        explanation['recommendation'] = "Moderate fit - evaluate based on other factors"
+    else:
+        explanation['recommendation'] = "Weak match - consider only if candidate pool is limited"
+    
+    return explanation
+```
+
+**Example Explanation Output**:
+```json
+{
+    "matched_skills": ["Python", "AWS", "Docker", "PostgreSQL"],
+    "missing_skills": ["React", "Kubernetes"],
+    "experience_summary": "8 years total, 5 years relevant backend experience",
+    "strengths": [
+        "Excellent skill match (85%)",
+        "Exceeds experience requirements",
+        "AWS Certified Solutions Architect",
+        "Strong ML/AI background"
+    ],
+    "concerns": [
+        "No frontend experience (React required)",
+        "Notice period: 90 days"
+    ],
+    "recommendation": "Strong candidate - proceed to interview immediately. Consider pairing with frontend specialist."
+}
+```
+
+---
+
+#### 5. Red Flag Detection
+**Purpose**: Automatically identify potential concerns in candidate profiles
+
+**Red Flags to Detect**:
+
+1. **Employment Gaps**
+   ```python
+   def detect_employment_gaps(experience: list) -> list:
+       gaps = []
+       sorted_exp = sorted(experience, key=lambda x: x['start_date'])
+       
+       for i in range(len(sorted_exp) - 1):
+           current_end = sorted_exp[i]['end_date']
+           next_start = sorted_exp[i+1]['start_date']
+           
+           gap_months = months_between(current_end, next_start)
+           if gap_months > 6:  # 6+ month gap
+               gaps.append({
+                   'type': 'employment_gap',
+                   'duration_months': gap_months,
+                   'period': f"{current_end} to {next_start}"
+               })
+       
+       return gaps
+   ```
+
+2. **Frequent Job Changes**
+   ```python
+   def detect_job_hopping(experience: list) -> dict:
+       if len(experience) < 3:
+           return None
+       
+       recent_jobs = [e for e in experience if years_ago(e['start_date']) <= 3]
+       
+       if len(recent_jobs) >= 4:
+           return {
+               'type': 'frequent_job_changes',
+               'count': len(recent_jobs),
+               'period': 'Last 3 years',
+               'concern': 'High turnover rate may indicate instability'
+           }
+       
+       return None
+   ```
+
+3. **Skill-Experience Mismatch**
+   ```python
+   def detect_skill_mismatch(skills: list, total_years: float) -> dict:
+       # If 10+ years experience but very basic skills
+       if total_years >= 10 and len(skills) < 5:
+           return {
+               'type': 'skill_experience_mismatch',
+               'concern': 'Limited skill set for experience level'
+           }
+       
+       # If claims expert in many technologies but low experience
+       if total_years < 3 and len(skills) > 15:
+           return {
+               'type': 'over_claiming',
+               'concern': 'Unusually broad skill set for experience level'
+           }
+       
+       return None
+   ```
+
+4. **Resume Quality Issues**
+   ```python
+   def detect_quality_issues(resume_text: str) -> list:
+       issues = []
+       
+       # Check for typos (basic spell check)
+       if typo_count(resume_text) > 5:
+           issues.append({
+               'type': 'poor_quality',
+               'concern': 'Multiple spelling/grammar errors'
+           })
+       
+       # Check for length
+       if len(resume_text.split()) < 100:
+           issues.append({
+               'type': 'insufficient_detail',
+               'concern': 'Resume lacks detail'
+           })
+       
+       return issues
+   ```
+
+---
+
+#### 6. Conversational AI (Chatbot)
+**Purpose**: Allow recruiters to query candidate data using natural language
+
+**Technology**:
+- **LLM**: OpenAI GPT-4 or Claude
+- **Query Understanding**: Intent classification + entity extraction
+- **Database Querying**: Convert natural language to SQL/filters
+
+**Implementation Logic**:
+```python
+class RecruitmentChatbot:
+    def __init__(self, llm_client):
+        self.llm = llm_client
+        
+    def process_query(self, query: str, context: dict) -> dict:
+        # Step 1: Understand intent
+        intent = self.classify_intent(query)
+        
+        # Step 2: Extract parameters
+        params = self.extract_parameters(query, intent)
+        
+        # Step 3: Execute query
+        results = self.execute_query(intent, params, context)
+        
+        # Step 4: Generate natural language response
+        response = self.generate_response(query, results, intent)
+        
+        return {
+            'intent': intent,
+            'parameters': params,
+            'results': results,
+            'response': response
+        }
+    
+    def classify_intent(self, query: str) -> str:
+        """
+        Possible intents:
+        - filter_candidates: "Show me Python developers"
+        - explain_ranking: "Why is Sarah ranked #1?"
+        - show_top_n: "Top 5 candidates"
+        - find_specific: "Find candidates with AWS experience"
+        - compare: "Compare candidate A and B"
+        - get_stats: "How many candidates applied?"
+        """
+        
+        prompt = f"""
+        Classify the following recruiter query into one of these intents:
+        - filter_candidates
+        - explain_ranking
+        - show_top_n
+        - find_specific
+        - compare
+        - get_stats
+        
+        Query: "{query}"
+        
+        Return only the intent name.
+        """
+        
+        intent = self.llm.generate(prompt).strip()
+        return intent
+    
+    def extract_parameters(self, query: str, intent: str) -> dict:
+        """Extract relevant parameters from query"""
+        
+        prompt = f"""
+        Extract parameters from this query:
+        Query: "{query}"
+        Intent: {intent}
+        
+        Return JSON with relevant fields like:
+        - skills: list of skills mentioned
+        - experience_min: minimum years
+        - experience_max: maximum years
+        - count: number of candidates requested
+        - candidate_name: specific candidate name
+        
+        Return only valid JSON.
+        """
+        
+        params_json = self.llm.generate(prompt)
+        return json.loads(params_json)
+    
+    def execute_query(self, intent: str, params: dict, context: dict) -> list:
+        """Execute the actual database query"""
+        
+        if intent == 'filter_candidates':
+            return self.filter_candidates(params, context['job_id'])
+        elif intent == 'show_top_n':
+            return self.get_top_candidates(params.get('count', 5), context['job_id'])
+        elif intent == 'explain_ranking':
+            return self.explain_candidate_ranking(params['candidate_name'], context['job_id'])
+        # ... other intents
+    
+    def generate_response(self, original_query: str, results: list, intent: str) -> str:
+        """Generate natural language response"""
+        
+        prompt = f"""
+        User asked: "{original_query}"
+        
+        Query results: {json.dumps(results, indent=2)}
+        
+        Generate a helpful, conversational response that:
+        1. Directly answers their question
+        2. Highlights key insights
+        3. Suggests next actions if relevant
+        
+        Keep it concise and professional.
+        """
+        
+        response = self.llm.generate(prompt)
+        return response
+```
+
+**Example Conversations**:
+
+```
+User: "Show me top 5 Python developers with AWS experience"
+
+System: 
+Intent: filter_candidates
+Params: {skills: ['Python', 'AWS'], count: 5}
+
+Response: "I found 5 candidates matching your criteria:
+
+1. Sarah Chen - 8 years Python, AWS Certified, Score: 0.92
+   Strengths: Strong ML background, AWS Solutions Architect
+   
+2. Michael Rodriguez - 6 years Python, AWS experience, Score: 0.88
+   Strengths: Strong backend architecture, Docker/K8s
+   
+3. Priya Sharma - 5 years Python, AWS + Azure, Score: 0.85
+   
+Would you like detailed profiles or should I schedule interviews?"
+```
+
+```
+User: "Why is Sarah ranked higher than Michael?"
+
+Response: "Sarah scores higher (0.92 vs 0.88) due to:
+
+✓ Longer Python experience (8 vs 6 years)
+✓ AWS Solutions Architect certification
+✓ ML/AI specialization (mentioned in JD as nice-to-have)
+✓ Published technical articles
+
+Michael is also strong, particularly in infrastructure (K8s). Both are excellent candidates."
+```
+
+---
+
+## 🔌 API DESIGN
+
+### RESTful Endpoints
+
+#### Authentication
+```
+POST /api/auth/register
+POST /api/auth/login
+POST /api/auth/refresh
+POST /api/auth/logout
+```
+
+#### Job Descriptions
+```
+POST   /api/jd/create
+GET    /api/jd/list
+GET    /api/jd/{id}
+PUT    /api/jd/{id}
+DELETE /api/jd/{id}
+POST   /api/jd/{id}/parse  # Parse and extract requirements
+```
+
+#### Resume Management
+```
+POST   /api/resumes/upload          # Bulk upload multiple resumes
+GET    /api/resumes/list
+GET    /api/resumes/{id}
+DELETE /api/resumes/{id}
+POST   /api/resumes/{id}/reprocess  # Re-run parsing
+```
+
+#### Candidate Ranking
+```
+POST   /api/ranking/generate         # Trigger ranking for a JD
+GET    /api/ranking/candidates/{jd_id}  # Get ranked candidates
+GET    /api/ranking/explain/{resume_id}/{jd_id}  # Get explanation
+POST   /api/ranking/recalculate/{jd_id}  # Recalculate with new weights
+```
+
+#### Chatbot
+```
+POST   /api/chat/query
+GET    /api/chat/history/{job_id}
+DELETE /api/chat/clear/{job_id}
+```
+
+#### Analytics
+```
+GET    /api/analytics/dashboard/{jd_id}
+GET    /api/analytics/skill-gaps/{jd_id}
+GET    /api/analytics/time-to-fill
+```
+
+### Request/Response Examples
+
+#### POST /api/resumes/upload
+**Request**:
+```json
+{
+    "job_description_id": "uuid-here",
+    "files": ["file1.pdf", "file2.pdf", "file3.docx"]
+}
+```
+
+**Response**:
+```json
+{
+    "success": true,
+    "uploaded_count": 3,
+    "resumes": [
+        {
+            "id": "resume-uuid-1",
+            "candidate_name": "Sarah Chen",
+            "status": "processing",
+            "uploaded_at": "2025-01-15T10:30:00Z"
+        },
+        {
+            "id": "resume-uuid-2",
+            "candidate_name": "Michael Rodriguez",
+            "status": "processing",
+            "uploaded_at": "2025-01-15T10:30:01Z"
+        }
+    ],
+    "processing_time_estimate": "30 seconds"
+}
+```
+
+#### GET /api/ranking/candidates/{jd_id}
+**Response**:
+```json
+{
+    "job_description": {
+        "id": "jd-uuid",
+        "title": "Senior Backend Engineer",
+        "total_applicants": 47
+    },
+    "candidates": [
+        {
+            "rank": 1,
+            "resume_id": "resume-uuid-1",
+            "candidate_name": "Sarah Chen",
+            "candidate_email": "sarah@email.com",
+            "final_score": 0.92,
+            "score_breakdown": {
+                "semantic_similarity": 0.89,
+                "skill_match": 0.95,
+                "experience_match": 0.90,
+                "education_match": 1.0
+            },
+            "matched_skills": ["Python", "AWS", "Docker", "PostgreSQL"],
+            "missing_skills": ["React"],
+            "quick_summary": "8 years experience, AWS Certified, strong ML background",
+            "recommendation": "Strong candidate - proceed to interview immediately"
+        },
+        {
+            "rank": 2,
+            "resume_id": "resume-uuid-2",
+            "candidate_name": "Michael Rodriguez",
+            "final_score": 0.88,
+            "quick_summary": "6 years experience, strong infrastructure skills"
+        }
+        // ... more candidates
+    ],
+    "filters_applied": null,
+    "generated_at": "2025-01-15T10:35:22Z"
+}
+```
+
+#### POST /api/chat/query
+**Request**:
+```json
+{
+    "job_description_id": "jd-uuid",
+    "query": "Show me candidates with 5+ years Python experience and available in 30 days",
+    "conversation_id": "conv-uuid"  // optional, for context
+}
+```
+
+**Response**:
+```json
+{
+    "query": "Show me candidates with 5+ years Python experience and available in 30 days",
+    "intent": "filter_candidates",
+    "extracted_parameters": {
+        "skills": ["Python"],
+        "experience_min": 5,
+        "notice_period_max": 30
+    },
+    "results_count": 12,
+    "response": "I found 12 candidates matching your criteria:\n\n**Top 3:**\n1. Sarah Chen (8y Python, 30d notice) - Score: 0.92\n2. Amit Patel (7y Python, immediate) - Score: 0.87\n3. Lisa Wong (6y Python, 15d notice) - Score: 0.84\n\nWould you like me to show all 12 or schedule interviews with the top 3?",
+    "candidates": [
+        {
+            "id": "resume-uuid-1",
+            "name": "Sarah Chen",
+            "score": 0.92,
+            "experience_years": 8,
+            "notice_period": "30 days"
+        }
+        // ... more
+    ],
+    "suggested_actions": [
+        "View detailed profiles",
+        "Schedule interviews",
+        "Export to spreadsheet"
+    ]
+}
+```
+
+---
+
+## 🎨 FRONTEND DESIGN
+
+### Pages & Components
+
+#### 1. Dashboard (Landing Page)
+**Purpose**: Overview of all job requisitions and hiring pipeline
+
+**Components**:
+- Job requisition cards (title, open positions, applicants, avg time-to-fill)
+- Quick stats: Total applicants this month, interviews scheduled, offers made
+- Recent activity feed
+- Quick actions: Create new JD, Upload resumes, View analytics
+
+**Key Metrics Displayed**:
+```
+┌─────────────────────────────────────────────┐
+│  Active Job Requisitions: 8                 │
+│  Total Applicants (this month): 234         │
+│  Avg Time to Screen: 5 minutes (↓ 95%)     │
+│  Top Candidate Quality Score: 0.91          │
+└─────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────┐
+│ Job Requisition Cards (Grid)                         │
+│  ┌────────────────┐  ┌────────────────┐             │
+│  │ Senior Backend │  │ Frontend Dev   │             │
+│  │ 47 applicants  │  │ 28 applicants  │             │
+│  │ Top: 0.92     │  │ Top: 0.87     │             │
+│  └────────────────┘  └────────────────┘             │
+└──────────────────────────────────────────────────────┘
+```
+
+#### 2. Job Description Management
+**Purpose**: Create and manage job descriptions
+
+**Features**:
+- Rich text editor for JD creation
+- Template library (common roles)
+- Auto-extraction of requirements (skills, experience, education)
+- Preview of how AI will parse the JD
+
+**Form Fields**:
+- Job Title
+- Department
+- Location (remote/hybrid/office)
+- Experience Required (dropdown: 0-2y, 2-5y, 5-10y, 10+y)
+- Education Required (dropdown: Any, Bachelors, Masters, PhD)
+- Required Skills (multi-select with autocomplete)
+- Nice-to-Have Skills
+- Job Description (rich text)
+
+**AI-Assisted Features**:
+- "Generate JD from title" button (uses LLM)
+- "Suggest required skills based on similar roles"
+- "Benchmark salary range" (from market data)
+
+#### 3. Resume Upload & Processing
+**Purpose**: Bulk upload and automated processing
+
+**Upload Interface**:
+```
+┌──────────────────────────────────────────────┐
+│  Drag & drop resumes here                    │
+│  or click to browse                          │
+│                                              │
+│  Supported: PDF, DOCX (max 10MB each)       │
+│  Bulk upload: up to 100 files at once       │
+└──────────────────────────────────────────────┘
+
+Processing Status:
+✓ resume_sarah_chen.pdf - Processed (2.3s)
+✓ resume_michael_r.pdf - Processed (1.8s)
+⏳ resume_amit_patel.docx - Processing...
+❌ resume_corrupted.pdf - Failed: Unable to extract text
+```
+
+**Processing Pipeline Visualization**:
+```
+Resume → Extract Text → Parse Data → Extract Skills → Generate Embedding → Calculate Match → Store Results
+  ↓         ↓            ↓             ↓                ↓                    ↓               ↓
+ PDF      spaCy        NER       Dict Matching    Transformer           Scoring         Database
+```
+
+#### 4. Candidate Ranking Dashboard
+**Purpose**: View and interact with ranked candidates
+
+**Layout**:
+```
+┌─────────────────────────────────────────────────────────┐
+│  Senior Backend Engineer - 47 Candidates                │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │ Filters: Skills [Python] [AWS] [Docker]          │  │
+│  │ Experience: 3-5 years    Notice Period: < 60d    │  │
+│  │ [Apply Filters] [Clear] [Export CSV]             │  │
+│  └──────────────────────────────────────────────────┘  │
+│                                                         │
+│  Showing: 12 of 47 candidates                          │
+│                                                         │
+│  ┌─────────────────────────────────────────────────┐  │
+│  │ #1 | Sarah Chen | score: 0.92        [Details]  │  │
+│  │    sarah.chen@email.com | 8 years exp          │  │
+│  │    ✓ Python ✓ AWS ✓ Docker ✓ PostgreSQL       │  │
+│  │    ✗ React (missing)                            │  │
+│  │    💡 "Strong ML background, AWS Certified"     │  │
+│  │    [Schedule Interview] [View Resume]           │  │
+│  └─────────────────────────────────────────────────┘  │
+│                                                         │
+│  ┌─────────────────────────────────────────────────┐  │
+│  │ #2 | Michael Rodriguez | score: 0.88 [Details] │  │
+│  │    michael.r@email.com | 6 years exp           │  │
+│  │    ✓ Python ✓ AWS ✓ Kubernetes                │  │
+│  │    ⚠️ "Frequent job changes in last 2 years"   │  │
+│  │    [Schedule Interview] [View Resume]           │  │
+│  └─────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Candidate Detail Modal**:
+```
+┌──────────────────────────────────────────────────────┐
+│  Sarah Chen - Detailed Profile              [Close]  │
+├──────────────────────────────────────────────────────┤
+│  📧 sarah.chen@email.com                             │
+│  📱 +1-555-0123                                      │
+│  💼 8 years experience                               │
+│  🎓 MS Computer Science - Stanford                   │
+│                                                      │
+│  Match Score: 0.92 / 1.0                            │
+│  ┌──────────────────────────────────────────────┐  │
+│  │ Semantic Similarity:  ████████████ 89%       │  │
+│  │ Skill Match:          █████████████ 95%      │  │
+│  │ Experience Match:     ██████████ 90%         │  │
+│  │ Education Match:      ████████████ 100%      │  │
+│  └──────────────────────────────────────────────┘  │
+│                                                      │
+│  ✅ Strengths:                                       │
+│  • Exceeds experience requirements                   │
+│  • AWS Solutions Architect Certified                 │
+│  • Strong ML/AI background                           │
+│  • Published technical articles                      │
+│                                                      │
+│  ⚠️ Considerations:                                  │
+│  • No React experience (required in JD)              │
+│  • Notice period: 90 days (longer than average)      │
+│                                                      │
+│  💡 Recommendation:                                  │
+│  "Strong candidate - proceed to interview            │
+│   immediately. Consider pairing with frontend        │
+│   specialist or plan for React training."            │
+│                                                      │
+│  Recent Experience:                                  │
+│  • Senior Engineer @ TechCorp (2020-Present)         │
+│    - Built ML pipeline processing 10M events/day     │
+│    - Led team of 5 engineers                         │
+│  • Backend Engineer @ StartupXYZ (2018-2020)         │
+│                                                      │
+│  [Download Resume] [Schedule Interview] [Shortlist]  │
+└──────────────────────────────────────────────────────┘
+```
+
+#### 5. Chatbot Interface
+**Purpose**: Natural language interaction with candidate data
+
+**Chat Window**:
+```
+┌──────────────────────────────────────────────────────┐
+│  TalentIQ Assistant 🤖                     [Minimize]│
+├──────────────────────────────────────────────────────┤
+│  💬 Conversation: Senior Backend Engineer Role       │
+│                                                      │
+│  You: Show me top 5 Python developers               │
+│                                                      │
+│  🤖 TalentIQ: I found 47 candidates with Python      │
+│  skills. Here are the top 5:                        │
+│                                                      │
+│  1. Sarah Chen (Score: 0.92) - 8 years              │
+│  2. Michael R. (Score: 0.88) - 6 years              │
+│  3. Priya Sharma (Score: 0.85) - 5 years            │
+│  4. David Kim (Score: 0.82) - 7 years               │
+│  5. Ana Santos (Score: 0.80) - 4 years              │
+│                                                      │
+│  Would you like detailed profiles?                   │
+│  [View All 5] [Schedule Interviews]                  │
+│                                                      │
+│  ─────────────────────────────────────────────────  │
+│                                                      │
+│  You: Why is Sarah ranked higher than Michael?      │
+│                                                      │
+│  🤖 TalentIQ: Sarah scores higher due to:            │
+│  ✓ 2 more years of Python experience                │
+│  ✓ AWS Solutions Architect certification            │
+│  ✓ ML specialization (nice-to-have in JD)           │
+│                                                      │
+│  Michael is also strong, especially in               │
+│  infrastructure (Kubernetes expertise).              │
+│                                                      │
+│  Both are excellent candidates.                      │
+│                                                      │
+│  ─────────────────────────────────────────────────  │
+│                                                      │
+│  You: [Type your question...]              [Send]   │
+└──────────────────────────────────────────────────────┘
+```
+
+**Suggested Queries** (Quick Action Buttons):
+- "Show candidates available in 30 days"
+- "Find candidates with AWS + Python"
+- "Who has the most experience?"
+- "Any red flags in top 10?"
+- "Compare top 3 candidates"
+
+#### 6. Analytics Dashboard
+**Purpose**: Insights and metrics for hiring process
+
+**Visualizations**:
+
+1. **Time-to-Screen Comparison**
+   ```
+   Before TalentIQ: ████████████████████ 5 hours
+   After TalentIQ:  ▌ 5 minutes
+   
+   Reduction: 95% (4h 55m saved per requisition)
+   ```
+
+2. **Candidate Quality Distribution**
+   ```
+   Score Range     | Count | Percentage
+   0.9 - 1.0       |   5   | ███████ 10.6%
+   0.8 - 0.9       |  12   | █████████████████ 25.5%
+   0.7 - 0.8       |  18   | ████████████████████████ 38.3%
+   0.6 - 0.7       |   8   | ███████████ 17.0%
+   < 0.6           |   4   | █████ 8.5%
+   ```
+
+3. **Skill Gap Analysis**
+   ```
+   Most Common Missing Skills:
+   1. React (32 candidates missing)
+   2. Kubernetes (28 candidates missing)
+   3. TypeScript (15 candidates missing)
+   ```
+
+4. **Processing Performance**
+   ```
+   Avg Resume Processing Time: 2.3 seconds
+   Total Resumes Processed: 234
+   Success Rate: 97.4%
+   Failed (corrupted files): 6
+   ```
+
+---
+
+## 🔐 SECURITY & MULTI-TENANCY
+
+### Multi-Tenant Architecture
+
+**Tenant Isolation Strategies**:
+
+1. **Database Level**:
+   - Every table has `tenant_id` column
+   - Row-level security (RLS) policies in PostgreSQL
+   - All queries automatically filtered by tenant
+
+2. **Application Level**:
+   ```python
+   # Middleware to inject tenant context
+   @app.middleware("http")
+   async def add_tenant_context(request: Request, call_next):
+       # Extract tenant from JWT token
+       token = request.headers.get("Authorization")
+       tenant_id = decode_jwt_tenant(token)
+       
+       # Inject into request state
+       request.state.tenant_id = tenant_id
+       
+       response = await call_next(request)
+       return response
+   
+   # All database queries use tenant_id
+   def get_candidates(jd_id: str, tenant_id: str):
+       return db.query(Candidate)\
+                .filter(Candidate.tenant_id == tenant_id)\
+                .filter(Candidate.jd_id == jd_id)\
+                .all()
+   ```
+
+3. **Storage Level**:
+   - Resume files stored in tenant-specific folders: `/resumes/{tenant_id}/{file}`
+   - Signed URLs for temporary access
+   - No cross-tenant file access possible
+
+**Authentication & Authorization**:
+
+```python
+# JWT Token Structure
+{
+    "user_id": "uuid",
+    "tenant_id": "uuid",
+    "email": "recruiter@company.com",
+    "role": "recruiter",  # recruiter, hiring_manager, admin
+    "permissions": ["read:candidates", "write:jd", "schedule:interview"],
+    "exp": 1736899200
+}
+
+# Role-Based Access Control (RBAC)
+PERMISSIONS = {
+    'admin': [
+        'read:*', 'write:*', 'delete:*',
+        'manage:users', 'view:analytics'
+    ],
+    'hiring_manager': [
+        'read:candidates', 'read:jd', 'read:rankings',
+        'write:jd', 'schedule:interview'
+    ],
+    'recruiter': [
+        'read:candidates', 'write:resumes',
+        'read:rankings', 'use:chatbot'
+    ]
+}
+
+# Permission check decorator
+def require_permission(permission: str):
+    def decorator(func):
+        async def wrapper(*args, **kwargs):
+            user = get_current_user()
+            if not has_permission(user.role, permission):
+                raise HTTPException(403, "Insufficient permissions")
+            return await func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+@app.get("/api/candidates")
+@require_permission("read:candidates")
+async def get_candidates():
+    # ...
+```
+
+**Data Privacy**:
+- PII (Personally Identifiable Information) encrypted at rest
+- Resume files encrypted in S3
+- Audit logs for all data access
+- GDPR compliance: candidate data deletion on request
+- Retention policy: auto-delete after 90 days (configurable)
+
+---
+
+## 🚀 DEPLOYMENT ARCHITECTURE
+
+### Production Stack
+
+```
+┌──────────────────────────────────────────────────────┐
+│                    USERS                             │
+└────────────────────┬─────────────────────────────────┘
+                     │
+┌────────────────────▼─────────────────────────────────┐
+│              CDN (Cloudflare)                        │
+│          (Static Assets, Caching)                    │
+└────────────────────┬─────────────────────────────────┘
+                     │
+┌────────────────────▼─────────────────────────────────┐
+│          Load Balancer (nginx)                       │
+│         (SSL Termination, Routing)                   │
+└────────┬──────────────────────────┬──────────────────┘
+         │                          │
+┌────────▼────────┐        ┌────────▼────────┐
+│   Frontend      │        │   Backend       │
+│   (Vercel)      │        │  (Railway/      │
+│                 │        │   Render)       │
+│   - React App   │        │  - FastAPI      │
+│   - Static      │        │  - Workers      │
+└─────────────────┘        └────────┬────────┘
+                                    │
+                    ┌───────────────┼───────────────┐
+                    │               │               │
+          ┌─────────▼────┐  ┌───────▼──────┐  ┌────▼────┐
+          │ PostgreSQL   │  │  Vector DB   │  │  Redis  │
+          │  (Supabase)  │  │  (Pinecone/  │  │ (Cache) │
+          │              │  │   Weaviate)  │  │         │
+          └──────────────┘  └──────────────┘  └─────────┘
+                                    │
+                          ┌─────────▼──────────┐
+                          │   File Storage     │
+                          │   (S3/R2)          │
+                          │   - Resume PDFs    │
+                          └────────────────────┘
+```
+
+### Environment Configuration
+
+**Development**:
+```env
+# .env.development
+ENV=development
+DEBUG=true
+DATABASE_URL=postgresql://localhost:5432/talentiq_dev
+REDIS_URL=redis://localhost:6379
+AWS_S3_BUCKET=talentiq-dev-resumes
+OPENAI_API_KEY=sk-...
+FRONTEND_URL=http://localhost:3000
+BACKEND_URL=http://localhost:8000
+```
+
+**Production**:
+```env
+# .env.production
+ENV=production
+DEBUG=false
+DATABASE_URL=postgresql://prod-db.supabase.co:5432/talentiq
+REDIS_URL=redis://prod-redis:6379
+AWS_S3_BUCKET=talentiq-prod-resumes
+OPENAI_API_KEY=sk-...
+FRONTEND_URL=https://talentiq.com
+BACKEND_URL=https://api.talentiq.com
+JWT_SECRET=<strong-secret>
+SENTRY_DSN=https://...  # Error tracking
+```
+
+### Docker Compose (Local Development)
+
+```yaml
+version: '3.8'
+
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:password@db:5432/talentiq
+      - REDIS_URL=redis://redis:6379
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - db
+      - redis
+    command: uvicorn main:app --reload --host 0.0.0.0
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: npm start
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: talentiq
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  worker:
+    build: ./backend
+    command: celery -A tasks worker --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql://postgres:password@db:5432/talentiq
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+      - db
+
+volumes:
+  postgres_data:
+```
+
+---
+
+## 📊 DATA FLOW DIAGRAMS
+
+### 1. Resume Upload & Processing Flow
+
+```
+User                 Frontend            Backend             AI Engine           Database
+ │                      │                   │                    │                 │
+ │  Upload Resumes      │                   │                    │                 │
+ ├─────────────────────>│                   │                    │                 │
+ │                      │  POST /upload     │                    │                 │
+ │                      ├──────────────────>│                    │                 │
+ │                      │                   │  Save files to S3  │                 │
+ │                      │                   ├───────────────────>│                 │
+ │                      │                   │                    │                 │
+ │                      │                   │  Queue parse jobs  │                 │
+ │                      │                   ├────────────────────┼────────────────>│
+ │                      │  202 Accepted     │                    │                 │
+ │                      │<──────────────────┤                    │                 │
+ │  Processing...       │                   │                    │                 │
+ │<─────────────────────┤                   │                    │                 │
+ │                      │                   │                    │                 │
+ │                      │                   │   [Worker Process] │                 │
+ │                      │                   │   Extract text     │                 │
+ │                      │                   │<───────────────────┤                 │
+ │                      │                   │   Parse with spaCy │                 │
+ │                      │                   │<───────────────────┤                 │
+ │                      │                   │   Extract skills   │                 │
+ │                      │                   │<───────────────────┤                 │
+ │                      │                   │   Generate embedding│                │
+ │                      │                   │<───────────────────┤                 │
+ │                      │                   │   Store parsed data│                 │
+ │                      │                   ├─────────────────────────────────────>│
+ │                      │  WebSocket update │                    │                 │
+ │  Resume processed ✓  │<──────────────────┤                    │                 │
+ │<─────────────────────┤                   │                    │                 │
+```
+
+### 2. Candidate Ranking Flow
+
+```
+User              Frontend        Backend         AI Engine       Database
+ │                   │                │                │              │
+ │  View Rankings    │                │                │              │
+ ├──────────────────>│                │                │              │
+ │                   │  GET /rankings │                │              │
+ │                   ├───────────────>│                │              │
+ │                   │                │  Check cache   │              │
+ │                   │                ├───────────────>│              │
+ │                   │                │  Cache miss    │              │
+ │                   │                │<───────────────┤              │
+ │                   │                │  Get resumes + JD             │
+ │                   │                ├──────────────────────────────>│
+ │                   │                │<──────────────────────────────┤
+ │                   │                │                │              │
+ │                   │                │  For each resume:             │
+ │                   │                │  1. Semantic similarity       │
+ │                   │                │<───────────────┤              │
+ │                   │                │  2. Skill match│              │
+ │                   │                │<───────────────┤              │
+ │                   │                │  3. Exp match  │              │
+ │                   │                │<───────────────┤              │
+ │                   │                │  4. Final score│              │
+ │                   │                │<───────────────┤              │
+ │                   │                │  5. Explanation│              │
+ │                   │                │<───────────────┤              │
+ │                   │                │                │              │
+ │                   │                │  Store rankings│              │
+ │                   │                ├──────────────────────────────>│
+ │                   │                │  Cache results │              │
+ │                   │                ├───────────────>│              │
+ │                   │  Ranked list   │                │              │
+ │  Display rankings │<───────────────┤                │              │
+ │<──────────────────┤                │                │              │
+```
+
+### 3. Chatbot Query Flow
+
+```
+User           Frontend      Backend       LLM API      Database
+ │                │              │             │            │
+ │  Ask question  │              │             │            │
+ ├───────────────>│              │             │            │
+ │                │  POST /chat  │             │            │
+ │                ├─────────────>│             │            │
+ │                │              │  Classify   │            │
+ │                │              │  intent     │            │
+ │                │              ├────────────>│            │
+ │                │              │  "filter"   │            │
+ │                │              │<────────────┤            │
+ │                │              │  Extract    │            │
+ │                │              │  params     │            │
+ │                │              ├────────────>│            │
+ │                │              │  {skills:...}│           │
+ │                │              │<────────────┤            │
+ │                │              │  Query DB   │            │
+ │                │              ├─────────────────────────>│
+ │                │              │  Results    │            │
+ │                │              │<─────────────────────────┤
+ │                │              │  Generate   │            │
+I'll complete the remaining documentation sections:
+
+```
+ │                │              │  response   │            │
+ │                │              ├────────────>│            │
+ │                │              │  Natural    │            │
+ │                │              │  language   │            │
+ │                │              │<────────────┤            │
+ │                │  Response +  │             │            │
+ │                │  candidates  │             │            │
+ │  Show answer   │<─────────────┤             │            │
+ │<───────────────┤              │             │            │
+ │                │              │  Log conversation         │
+ │                │              ├─────────────────────────>│
+```
+
+---
+
+## 🧪 TESTING STRATEGY
+
+### Unit Tests
+
+**Backend (pytest)**:
+```python
+# tests/test_resume_parser.py
+def test_extract_email():
+    text = "Contact: john.doe@example.com"
+    parser = ResumeParser()
+    contact = parser.extract_contact_info(text)
+    assert contact['email'] == "john.doe@example.com"
+
+def test_calculate_experience():
+    experience = [
+        {"start_date": "2020-01", "end_date": "2023-01"},
+        {"start_date": "2018-06", "end_date": "2020-01"}
+    ]
+    parser = ResumeParser()
+    total = parser.calculate_total_experience(experience)
+    assert total == 4.5  # 3 + 1.5 years
+
+# tests/test_ranking_engine.py
+def test_skill_match_score():
+    resume_skills = ["Python", "AWS", "Docker", "PostgreSQL"]
+    jd_skills = ["Python", "AWS", "React"]
+    
+    engine = RankingEngine()
+    score = engine.calculate_skill_match(resume_skills, jd_skills)
+    
+    assert score >= 0.66  # 2 out of 3 matched
+    assert score <= 1.0
+
+def test_experience_match_perfect():
+    resume_years = 5
+    jd_requirement = "3-5 years"
+    
+    engine = RankingEngine()
+    score = engine.calculate_experience_match(resume_years, jd_requirement)
+    
+    assert score == 1.0
+
+def test_red_flag_detection():
+    experience = [
+        {"company": "A", "start_date": "2023-01", "end_date": "2023-06"},
+        {"company": "B", "start_date": "2022-07", "end_date": "2023-01"},
+        {"company": "C", "start_date": "2022-01", "end_date": "2022-07"},
+        {"company": "D", "start_date": "2021-06", "end_date": "2022-01"}
+    ]
+    
+    detector = RedFlagDetector()
+    flags = detector.detect_job_hopping(experience)
+    
+    assert flags is not None
+    assert flags['type'] == 'frequent_job_changes'
+```
+
+**Frontend (Jest + React Testing Library)**:
+```javascript
+// tests/CandidateCard.test.jsx
+import { render, screen } from '@testing-library/react';
+import CandidateCard from '../components/CandidateCard';
+
+test('renders candidate information', () => {
+  const candidate = {
+    name: 'Sarah Chen',
+    score: 0.92,
+    matched_skills: ['Python', 'AWS'],
+    missing_skills: ['React']
+  };
+  
+  render(<CandidateCard candidate={candidate} />);
+  
+  expect(screen.getByText('Sarah Chen')).toBeInTheDocument();
+  expect(screen.getByText('0.92')).toBeInTheDocument();
+  expect(screen.getByText('Python')).toBeInTheDocument();
+});
+
+test('shows red flag warning', () => {
+  const candidate = {
+    name: 'John Doe',
+    red_flags: ['frequent_job_changes']
+  };
+  
+  render(<CandidateCard candidate={candidate} />);
+  
+  expect(screen.getByText(/job changes/i)).toBeInTheDocument();
+});
+```
+
+### Integration Tests
+
+```python
+# tests/integration/test_full_pipeline.py
+@pytest.mark.integration
+async def test_resume_upload_to_ranking():
+    # Create test job description
+    jd = await create_test_jd({
+        "title": "Senior Backend Engineer",
+        "required_skills": ["Python", "AWS"]
+    })
+    
+    # Upload test resume
+    resume_file = open("test_data/sample_resume.pdf", "rb")
+    response = await client.post(
+        f"/api/resumes/upload",
+        files={"file": resume_file},
+        data={"job_description_id": jd.id}
+    )
+    assert response.status_code == 202
+    
+    # Wait for processing
+    await wait_for_processing(response.json()['resume_id'])
+    
+    # Check ranking generated
+    rankings = await client.get(f"/api/ranking/candidates/{jd.id}")
+    assert rankings.status_code == 200
+    assert len(rankings.json()['candidates']) > 0
+    assert rankings.json()['candidates'][0]['final_score'] > 0
+
+@pytest.mark.integration
+async def test_chatbot_query_flow():
+    jd = await create_test_jd_with_candidates()
+    
+    response = await client.post(
+        "/api/chat/query",
+        json={
+            "job_description_id": jd.id,
+            "query": "Show me Python developers with 5+ years"
+        }
+    )
+    
+    assert response.status_code == 200
+    data = response.json()
+    assert data['intent'] == 'filter_candidates'
+    assert 'Python' in data['extracted_parameters']['skills']
+    assert data['results_count'] > 0
+```
+
+### Load Testing (Locust)
+
+```python
+# tests/load/locustfile.py
+from locust import HttpUser, task, between
+
+class TalentIQUser(HttpUser):
+    wait_time = between(1, 3)
+    
+    def on_start(self):
+        # Login
+        response = self.client.post("/api/auth/login", json={
+            "email": "test@example.com",
+            "password": "password123"
+        })
+        self.token = response.json()['access_token']
+        self.headers = {"Authorization": f"Bearer {self.token}"}
+    
+    @task(3)
+    def view_candidates(self):
+        self.client.get(
+            "/api/ranking/candidates/test-jd-id",
+            headers=self.headers
+        )
+    
+    @task(2)
+    def chat_query(self):
+        self.client.post(
+            "/api/chat/query",
+            headers=self.headers,
+            json={
+                "job_description_id": "test-jd-id",
+                "query": "Show top 10 candidates"
+            }
+        )
+    
+    @task(1)
+    def upload_resume(self):
+        files = {'file': open('test_resume.pdf', 'rb')}
+        self.client.post(
+            "/api/resumes/upload",
+            headers=self.headers,
+            files=files,
+            data={"job_description_id": "test-jd-id"}
+        )
+
+# Run with: locust -f locustfile.py --host=http://localhost:8000
+# Target: 100 concurrent users, <200ms p95 response time
+```
+
+---
+
+## 🔧 IMPLEMENTATION ROADMAP
+
+### Phase 1: MVP (8 weeks)
+
+**Weeks 1-2: Foundation**
+- [ ] Set up development environment
+- [ ] Initialize PostgreSQL database with schema
+- [ ] Set up FastAPI backend skeleton
+- [ ] Set up React frontend skeleton
+- [ ] Implement authentication (JWT)
+- [ ] Set up multi-tenancy framework
+
+**Weeks 3-4: Core Resume Processing**
+- [ ] Implement PDF/DOCX text extraction
+- [ ] Build resume parser (spaCy integration)
+- [ ] Implement skill extraction
+- [ ] Implement experience calculation
+- [ ] Build file upload API
+- [ ] Create resume management UI
+
+**Weeks 5-6: Ranking Engine**
+- [ ] Integrate sentence-transformers
+- [ ] Implement semantic matching
+- [ ] Build scoring algorithms (skill, experience, education)
+- [ ] Implement ranking calculation
+- [ ] Build explainability engine
+- [ ] Create ranking dashboard UI
+
+**Weeks 7-8: Polish & Testing**
+- [ ] Red flag detection
+- [ ] Candidate detail views
+- [ ] Export functionality (CSV)
+- [ ] Unit tests (80% coverage)
+- [ ] Integration tests
+- [ ] User acceptance testing
+- [ ] Deploy MVP to staging
+
+### Phase 2: Intelligence Layer (4 weeks)
+
+**Weeks 9-10: Chatbot**
+- [ ] Integrate OpenAI/Claude API
+- [ ] Build intent classification
+- [ ] Implement parameter extraction
+- [ ] Create query execution engine
+- [ ] Build chat UI
+- [ ] Test conversational flows
+
+**Weeks 11-12: Advanced Features**
+- [ ] Skill gap analysis
+- [ ] Candidate comparison view
+- [ ] Analytics dashboard
+- [ ] Email notifications
+- [ ] Advanced filters
+- [ ] Bulk operations
+
+### Phase 3: Enterprise Features (4 weeks)
+
+**Weeks 13-14: Collaboration**
+- [ ] Interview scheduling
+- [ ] Candidate status pipeline
+- [ ] Feedback collection
+- [ ] Team collaboration features
+- [ ] Activity feed
+- [ ] Comments/notes on candidates
+
+**Weeks 15-16: Scale & Optimize**
+- [ ] Performance optimization
+- [ ] Caching strategy (Redis)
+- [ ] Background job processing (Celery)
+- [ ] API rate limiting
+- [ ] Load testing
+- [ ] Production deployment
+
+---
+
+## 📈 SUCCESS METRICS & KPIs
+
+### Primary Metrics
+
+1. **Time Efficiency**
+   - Target: 95% reduction in screening time
+   - Measure: Average time from resume upload to ranked list
+   - Current: 5 hours → Target: 5 minutes
+
+2. **Ranking Accuracy**
+   - Target: 80%+ overlap with expert recruiter rankings
+   - Measure: Kendall Tau correlation with manual rankings
+   - Method: A/B test with real recruiters
+
+3. **Candidate Quality**
+   - Target: 90%+ of top 10 AI picks progress to interview
+   - Measure: Interview conversion rate
+   - Compare: AI picks vs manual picks
+
+4. **User Adoption**
+   - Target: 80% of recruiters use system weekly
+   - Measure: Weekly Active Users (WAU)
+   - Track: Feature usage, session duration
+
+### Secondary Metrics
+
+- **Resume Processing Success Rate**: >95%
+- **Chatbot Query Success Rate**: >85% queries answered correctly
+- **User Satisfaction Score**: >4.5/5.0
+- **Time to Fill Position**: 30% reduction
+- **Cost per Hire**: 40% reduction
+
+### Business Metrics
+
+- **ROI Calculation**:
+  ```
+  Annual Savings per Recruiter:
+  - 20 requisitions/month
+  - 5 hours saved per req
+  - 100 hours saved/month
+  - Recruiter hourly cost: $50
+  - Monthly savings: $5,000
+  - Annual savings: $60,000
+  
+  For 10 recruiters: $600,000 annual savings
+  ```
+
+- **Customer Success Metrics**:
+  - Time to first value: <1 day
+  - Onboarding completion rate: >90%
+  - Customer retention rate: >95%
+  - NPS Score: >50
+
+---
+
+## 🛠️ TECHNICAL STACK SUMMARY
+
+### Backend
+```
+Language: Python 3.11+
+Framework: FastAPI
+API: RESTful + WebSocket
+Task Queue: Celery
+Message Broker: Redis
+Authentication: JWT (python-jose)
+```
+
+### Frontend
+```
+Framework: React 18+
+Language: TypeScript
+Styling: Tailwind CSS
+State: Redux Toolkit
+Routing: React Router
+HTTP: Axios
+Real-time: Socket.io-client
+```
+
+### AI/ML
+```
+NLP: spaCy (en_core_web_lg)
+Embeddings: sentence-transformers (all-MiniLM-L6-v2)
+LLM: OpenAI GPT-4 / Anthropic Claude
+PDF Parsing: PyPDF2, pdfplumber
+DOCX Parsing: python-docx
+```
+
+### Database
+```
+Primary: PostgreSQL 15+
+Extensions: pgvector (for embeddings)
+Vector Store: Pinecone / Weaviate (optional)
+Cache: Redis
+ORM: SQLAlchemy
+Migrations: Alembic
+```
+
+### Infrastructure
+```
+Hosting: Railway / Render / AWS
+Frontend CDN: Vercel / Cloudflare
+File Storage: AWS S3 / Cloudflare R2
+Monitoring: Sentry, DataDog
+CI/CD: GitHub Actions
+Containerization: Docker
+```
+
+---
+
+## 🚨 KNOWN LIMITATIONS & FUTURE IMPROVEMENTS
+
+### Current Limitations
+
+1. **Resume Parsing**
+   - May struggle with highly creative/non-standard formats
+   - Tables and multi-column layouts can cause issues
+   - Handwritten resumes not supported
+   - Limited support for non-English resumes
+
+2. **Semantic Matching**
+   - Model trained on general text, not job-specific
+   - May miss domain-specific jargon
+   - Context window limited to 512 tokens
+
+3. **Red Flag Detection**
+   - Rule-based, not ML-based
+   - May produce false positives
+   - Cannot detect fabricated information
+
+4. **Scalability**
+   - Current architecture handles ~1000 resumes/day
+   - Real-time processing limited to 100 concurrent uploads
+   - Vector search may slow down at >100k resumes
+
+### Future Improvements
+
+**Short-term (3-6 months)**:
+- [ ] Add video resume support
+- [ ] Integrate with ATS systems (Greenhouse, Lever)
+- [ ] Mobile app (iOS/Android)
+- [ ] Multi-language support
+- [ ] Automated email outreach
+- [ ] Calendar integration (Google, Outlook)
+
+**Medium-term (6-12 months)**:
+- [ ] Predictive analytics (time-to-hire, offer acceptance)
+- [ ] Diversity & inclusion metrics
+- [ ] Salary benchmarking
+- [ ] Interview question generator
+- [ ] Reference checking automation
+- [ ] Skills assessment integration
+
+**Long-term (12+ months)**:
+- [ ] Video interview analysis (facial expressions, speech patterns)
+- [ ] Culture fit prediction using company values
+- [ ] Career trajectory prediction
+- [ ] Automated offer letter generation
+- [ ] Onboarding workflow automation
+- [ ] Performance prediction models
+
+---
+
+## 🎓 TRAINING & DOCUMENTATION
+
+### User Training Materials
+
+**For Recruiters**:
+1. **Quick Start Guide** (5 minutes)
+   - How to create a job description
+   - How to upload resumes
+   - How to view ranked candidates
+
+2. **Advanced Features** (15 minutes)
+   - Using the chatbot effectively
+   - Understanding ranking explanations
+   - Customizing scoring weights
+   - Exporting and sharing results
+
+3. **Best Practices** (10 minutes)
+   - Writing effective job descriptions
+   - Interpreting red flags
+   - Using filters efficiently
+   - Collaborative hiring workflows
+
+**For Hiring Managers**:
+1. **Dashboard Overview** (5 minutes)
+2. **Reviewing Candidates** (10 minutes)
+3. **Providing Feedback** (5 minutes)
+
+**For Administrators**:
+1. **System Configuration** (20 minutes)
+2. **User Management** (10 minutes)
+3. **Analytics & Reporting** (15 minutes)
+
+### Technical Documentation
+
+**For Developers**:
+- API Documentation (Swagger/OpenAPI)
+- Database Schema Reference
+- Architecture Decision Records (ADRs)
+- Deployment Guide
+- Troubleshooting Guide
+
+**For ML Engineers**:
+- Model Training Procedures
+- Embedding Generation Pipeline
+- Ranking Algorithm Details
+- Performance Tuning Guide
+
+---
+
+## 📞 SUPPORT & MAINTENANCE
+
+### Support Tiers
+
+**Tier 1: Self-Service**
+- Knowledge base articles
+- Video tutorials
+- FAQs
+- Community forum
+
+**Tier 2: Email Support**
+- Response time: 24 hours
+- For general questions
+- Bug reports
+
+**Tier 3: Priority Support**
+- Response time: 4 hours
+- For enterprise customers
+- Dedicated Slack channel
+- Screen sharing sessions
+
+### Maintenance Windows
+
+**Regular Maintenance**:
+- Every Sunday 2:00 AM - 4:00 AM EST
+- System updates, backups
+- Performance optimization
+
+**Emergency Maintenance**:
+- Immediate response for critical issues
+- 99.9% uptime SLA
+
+### Monitoring & Alerts
+
+**Health Checks**:
+```python
+# /api/health endpoint
+{
+    "status": "healthy",
+    "timestamp": "2025-01-15T10:30:00Z",
+    "components": {
+        "database": "up",
+        "redis": "up",
+        "storage": "up",
+        "ml_service": "up"
+    },
+    "metrics": {
+        "response_time_p95": "120ms",
+        "error_rate": "0.01%",
+        "active_users": 42
+    }
+}
+```
+
+**Alert Thresholds**:
+- Response time p95 > 500ms
+- Error rate > 1%
+- Database connection failures
+- Storage quota > 90%
+- Processing queue > 1000 jobs
+
+---
+
+## 🔐 COMPLIANCE & LEGAL
+
+### Data Protection
+
+**GDPR Compliance**:
+- Right to access (export candidate data)
+- Right to deletion (permanent deletion within 30 days)
+- Right to rectification (candidate can update info)
+- Data portability (export in standard format)
+- Consent management
+
+**Data Retention**:
+- Active candidates: Indefinite (until deleted)
+- Inactive candidates: 90 days (configurable)
+- Audit logs: 1 year
+- Deleted data: 30-day soft delete, then permanent
+
+**Security Measures**:
+- Encryption at rest (AES-256)
+- Encryption in transit (TLS 1.3)
+- Regular security audits
+- Penetration testing (quarterly)
+- SOC 2 Type II compliance
+
+### Bias & Fairness
+
+**Anti-Discrimination**:
+- No demographic data used in scoring
+- Regular bias audits of ranking algorithms
+- Diversity metrics tracking
+- Explainable AI to prevent black-box decisions
+
+**Transparency**:
+- Open methodology documentation
+- Ranking explanation for every candidate
+- Audit trail for all decisions
+- Regular fairness reports
+
+---
+
+## 💰 PRICING STRATEGY
+
+### Pricing Tiers
+
+**Starter** ($99/month)
+- Up to 2 active job requisitions
+- 100 resume uploads/month
+- Basic ranking & filtering
+- Email support
+
+**Professional** ($299/month)
+- Up to 10 active job requisitions
+- 500 resume uploads/month
+- AI chatbot access
+- Advanced analytics
+- Priority support
+
+**Enterprise** (Custom pricing)
+- Unlimited job requisitions
+- Unlimited resume uploads
+- Custom integrations (ATS, HRIS)
+- Dedicated support
+- SLA guarantees
+- Custom training
+
+**Usage-Based Add-ons**:
+- Additional resumes: $0.50/resume
+- API access: $100/month
+- Advanced AI features: $50/month
+
+---
+
+## 🎯 GO-TO-MARKET STRATEGY
+
+### Target Customers
+
+**Primary**:
+- Mid-size tech companies (100-1000 employees)
+- GCCs (Global Capability Centers) in India
+- Fast-growing startups
+- Recruitment agencies
+
+**Secondary**:
+- Enterprise companies (1000+ employees)
+- HR consultancies
+- Educational institutions
+
+### Marketing Channels
+
+1. **Content Marketing**
+   - Blog posts on hiring best practices
+   - Case studies with customer success stories
+   - Webinars on AI in recruitment
+
+2. **Product-Led Growth**
+   - Free trial (14 days)
+   - Freemium tier (limited features)
+   - Viral loop (invite teammates)
+
+3. **Sales Strategy**
+   - Inbound leads from content
+   - Outbound to GCC HR leaders
+   - Partnerships with ATS providers
+
+4. **Community Building**
+   - LinkedIn community for recruiters
+   - Annual hiring summit
+   - Certification program
+
+### Launch Plan
+
+**Week 1-2: Beta Launch**
+- 10 pilot customers
+- Collect feedback
+- Fix critical bugs
+
+**Week 3-4: Soft Launch**
+- 50 early adopters
+- Case study creation
+- Testimonial collection
+
+**Week 5-8: Public Launch**
+- Press release
+- Product Hunt launch
+- LinkedIn campaign
+- Email marketing to leads
+
+---
+
+## 📊 APPENDIX
+
+### Glossary
+
+- **ATS**: Applicant Tracking System
+- **GCC**: Global Capability Center
+- **JD**: Job Description
+- **NER**: Named Entity Recognition
+- **NLP**: Natural Language Processing
+- **RBAC**: Role-Based Access Control
+- **RLS**: Row-Level Security
+- **SLA**: Service Level Agreement
+
+### Sample Data Formats
+
+**Job Description JSON**:
+```json
+{
+    "title": "Senior Backend Engineer",
+    "department": "Engineering",
+    "location": "Bangalore, India (Remote)",
+    "experience_required": "5-8 years",
+    "education_required": "Bachelors in Computer Science",
+    "required_skills": [
+        "Python", "FastAPI", "PostgreSQL", 
+        "AWS", "Docker", "Microservices"
+    ],
+    "nice_to_have": [
+        "React", "Kubernetes", "ML/AI"
+    ],
+    "responsibilities": [
+        "Design and implement scalable backend systems",
+        "Lead team of 3-5 engineers",
+        "Collaborate with product and frontend teams"
+    ]
+}
+```
+
+**Parsed Resume JSON**:
+```json
+{
+    "contact": {
+        "name": "Sarah Chen",
+        "email": "sarah.chen@email.com",
+        "phone": "+91-9876543210",
+        "linkedin": "linkedin.com/in/sarahchen"
+    },
+    "education": [
+        {
+            "degree": "MS Computer Science",
+            "institution": "Stanford University",
+            "year": "2015",
+            "gpa": "3.8/4.0"
+        }
+    ],
+    "experience": [
+        {
+            "company": "TechCorp India",
+            "role": "Senior Software Engineer",
+            "start_date": "2020-01",
+            "end_date": "present",
+            "duration_years": 5,
+            "description": "Led backend team building ML pipeline..."
+        }
+    ],
+    "skills": {
+        "technical": [
+            "Python", "AWS", "Docker", "PostgreSQL", 
+            "FastAPI", "Kubernetes", "TensorFlow"
+        ],
+        "soft": ["Leadership", "Communication"],
+        "certifications": ["AWS Solutions Architect"]
+    },
+    "total_experience_years": 8.5,
+    "notice_period": "30 days"
+}
+```
+
+### API Response Examples
+
+**GET /api/ranking/candidates/{jd_id}?top=5**
+```json
+{
+    "job_id": "550e8400-e29b-41d4-a716-446655440000",
+    "job_title": "Senior Backend Engineer",
+    "total_candidates": 47,
+    "showing": 5,
+    "generated_at": "2025-01-15T10:30:00Z",
+    "candidates": [
+        {
+            "rank": 1,
+            "resume_id": "123e4567-e89b-12d3-a456-426614174000",
+            "name": "Sarah Chen",
+            "email": "sarah@email.com",
+            "phone": "+91-9876543210",
+            "score": 0.92,
+            "components": {
+                "semantic": 0.89,
+                "skills": 0.95,
+                "experience": 0.90,
+                "education": 1.00
+            },
+            "matched_skills": ["Python", "AWS", "Docker", "PostgreSQL"],
+            "missing_skills": ["React"],
+            "years_experience": 8,
+            "education": "MS Computer Science - Stanford",
+            "current_company": "TechCorp India",
+            "notice_period": "30 days",
+            "strengths": [
+                "Exceeds experience requirements",
+                "AWS Certified Solutions Architect",
+                "Strong ML/AI background"
+            ],
+            "concerns": [
+                "No React experience"
+            ],
+            "recommendation": "Strong candidate - proceed to interview",
+            "red_flags": []
+        }
+    ]
+}
+```
+
+---
+
+## 🎉 CONCLUSION
+
+TalentIQ represents a paradigm shift in GCC hiring, transforming recruitment from a time-consuming manual process into an intelligent, data-driven operation. By leveraging AI/ML for resume parsing, semantic matching, and explainable rankings, the system delivers:
+
+✅ **95% time savings** (5 hours → 5 minutes)  
+✅ **Improved candidate quality** through semantic understanding  
+✅ **Fair, explainable decisions** that recruiters can trust  
+✅ **Enhanced candidate experience** with transparent processes  
+
+The architecture is designed for scale, security, and extensibility, making it ready for enterprise deployment while maintaining simplicity for individual recruiters.
+
+**Next Steps**:
+1. Review this document with stakeholders
+2. Finalize technology choices
+3. Begin Phase 1 implementation
+4. Recruit pilot customers for beta testing
+5. Iterate based on real-world feedback
+
+---
+
+**Document Version**: 1.0  
+**Last Updated**: January 15, 2025  
+**Authors**: Product & Engineering Team  
+**Status**: Ready for Implementation
+
+
+
+
+
+
+can you go through this and let me know whether its achievable or not , if it is achievable then what are the necessary things you require from my side to build it ? 

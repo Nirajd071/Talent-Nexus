@@ -1,0 +1,46 @@
+Problem Area 1: Hiring in GCCs
+Context:
+Global Capability Centers (GCCs) run high-volume, high-skill hiring operations spanning geographies and domains. Traditional hiring processes often remain transactional — manually intensive and fragmented.
+Concept:
+Focus Areas:
+1. Talent Discovery Layer
+Covers sourcing, skill mapping, resume intelligence, and outreach automation.
+2. Evaluation & Decision Layer
+Covers screening, assessments, interviews, scheduling, offer workflows, and hiring analytics.
+3. Integration & Readiness Layer
+Covers onboarding, learning readiness, productivity enablement, and early-attrition prediction.
+Challenge:
+Reimagine GCC hiring as a data-intelligent ecosystem, where AI and automation augment decision-making, candidate experience, and recruiter efficiency.
+
+
+Understanding the Manual Hiring Lifecycle
+This document provides the background context for the hackathon's problem statement. It breaks down the "as-is" manual hiring process used by many large organizations. Use this KB to understand the existing pain points and identify opportunities for automation and intelligence.
+1. The Landscape: What is a GCC?
+What it is: A Global Capability Center (GCC) is a company's in-house "engine" for high-skill work. Think of it as the central hub for all the company's developers, data scientists, and financial analysts.
+The Scale: Because they are so large, they need to hire thousands of talented people every year.
+The Process: To manage this volume, they have a dedicated "Talent Acquisition" (recruiting) team. This KB describes the manual process that team (and the candidates) are often stuck in.
+2. The Manual Hiring Process (A Step-by-Step Breakdown)
+Here is the typical journey a job takes, filled with manual steps, spreadsheets, and emails.
+Phase 1: Pre-Hiring (Getting Applications)
+Job Description: A Hiring Manager writes a job description (JD) in a Word doc and emails it to a Recruiter.
+Job Posting: The Recruiter manually copy-pastes this JD onto 5-10 different job websites.
+Resume Collection: All the resumes (PDFs, .docs) flood into one email inbox: careers@company.com.
+Manual Tracking: The Recruiter uses a detailed Excel spreadsheet to track everyone. They spend hours just copying and pasting names, emails, and changing a "status" cell from "New" to "Reviewed."
+Manual Screening: The Recruiter opens hundreds of resumes, one by one, spending about 10 seconds on each to hunt for keywords (like "Python" or "SQL").
+Candidate Experience: Candidates spend time tailoring their resume, send it in, and often hear nothing. This experience feels like applying into an opaque system. They have no idea if their application was received, seen by a human, or just lost in the spreadsheet.
+
+Phase 2: Hiring (The Interview Process)
+Scheduling: The Recruiter finds 5 good resumes. They try to coordinate schedules between the candidate and 3-4 busy internal interviewers. This alone can take a week of back-and-forth emails.
+Assessments: The Recruiter emails a link to a separate coding test. They have to log into that other system to get the score, then manually copy-paste it back into their spreadsheet.
+Spreadsheet-Based Feedback: Interviewers typically utilize a shared Excel spreadsheet to track the interview process and assign grades. They rely on manually fixed rubrics to score candidates for each specific role.
+Subjective Decisions: The Recruiter has to chase everyone for their notes. The final decision is based on subjective opinions in a meeting, not on a clear, single view of the candidate's performance.
+Candidate Experience: Even after the offer is rolled out, they might be put on hold for a long time without further notice. It makes the candidate feel unassured.
+Phase 3: Post-Hiring (The Offer & Onboarding)
+Manual Offer: The team decides to hire someone. The Recruiter emails the HR team.
+HR Team manually finds a contract template, copy-pastes the candidate's name and salary, and emails the PDF to the candidate. The candidate has to sign, print, scan, and email it back.
+Unexpected Candidate Drop-offs: The manual system lacks any mechanism to track candidate engagement or sentiment during the long wait between offer acceptance and the joining date. Recruiters are often blind sided when a candidate stops responding or declines the offer at the last minute, forcing the team to restart the entire hiring cycle.
+Manual Onboarding: Once the contract is signed, HR manually emails the IT team (to get a laptop) and the new manager (to set up training).
+
+
+
+here is our actual problem statement with knowledge base
