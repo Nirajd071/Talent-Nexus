@@ -64,6 +64,16 @@ interface Application {
     status: string;
     appliedAt: string;
     job?: { title: string; department: string; location: string };
+    offer?: {
+        offerId: string;
+        role: string;
+        department: string;
+        baseSalary: number;
+        bonus: number;
+        status: string;
+        signingToken?: string;
+        signedAt?: string;
+    };
 }
 
 interface UserData {
@@ -346,9 +356,20 @@ export default function CandidatePortal() {
             case "shortlisted": return "bg-yellow-500";
             case "assessment": return "bg-purple-500";
             case "interview": return "bg-orange-500";
-            case "hired": return "bg-green-500";
+            case "offer_received": return "bg-emerald-500";
+            case "hired": return "bg-green-600";
+            case "offer_declined": return "bg-red-400";
             case "rejected": return "bg-red-500";
             default: return "bg-gray-500";
+        }
+    };
+
+    const getStatusLabel = (status: string) => {
+        switch (status) {
+            case "offer_received": return "Offer Received";
+            case "hired": return "🎉 Hired!";
+            case "offer_declined": return "Offer Declined";
+            default: return status.charAt(0).toUpperCase() + status.slice(1);
         }
     };
 
@@ -425,8 +446,8 @@ export default function CandidatePortal() {
                                 <KeyRound className="w-4 h-4" /> Secure Assessment
                             </TabsTrigger>
                         )}
-                        {/* Only show My Training tab if candidate is hired */}
-                        {applications.some(a => a.status === "hired") && (
+                        {/* Only show My Training tab if candidate is hired or has accepted offer */}
+                        {(applications.some(a => a.status === "hired") || applications.some(a => a.offer?.status === "accepted")) && (
                             <TabsTrigger value="training" className="gap-2">
                                 <GraduationCap className="w-4 h-4" /> My Training
                             </TabsTrigger>
@@ -518,17 +539,61 @@ export default function CandidatePortal() {
                             </Card>
                         ) : (
                             applications.map((app) => (
-                                <Card key={app._id}>
+                                <Card key={app._id} className={app.status === "hired" ? "border-green-300 bg-green-50" : app.status === "offer_received" ? "border-emerald-200 bg-emerald-50" : ""}>
                                     <CardContent className="p-6">
-                                        <div className="flex justify-between items-center">
+                                        <div className="flex justify-between items-start">
                                             <div>
-                                                <h3 className="font-semibold">{app.jobTitle || app.job?.title}</h3>
+                                                <h3 className="font-semibold text-lg">{app.jobTitle || app.job?.title}</h3>
                                                 <p className="text-sm text-slate-500">
                                                     Applied {new Date(app.appliedAt).toLocaleDateString()}
                                                 </p>
+
+                                                {/* Show offer details if any */}
+                                                {app.offer && (
+                                                    <div className="mt-3 p-3 bg-white rounded-lg border border-emerald-200">
+                                                        <h4 className="font-medium text-emerald-700 flex items-center gap-2">
+                                                            <FileText className="w-4 h-4" />
+                                                            Offer: {app.offer.role}
+                                                        </h4>
+                                                        <div className="grid grid-cols-2 gap-2 mt-2 text-sm text-slate-600">
+                                                            <span>Base Salary: ${app.offer.baseSalary?.toLocaleString()}</span>
+                                                            <span>Bonus: ${app.offer.bonus?.toLocaleString()}</span>
+                                                            <span>Department: {app.offer.department}</span>
+                                                            {app.offer.signedAt && (
+                                                                <span className="text-green-600">✅ Signed: {app.offer.signedAt}</span>
+                                                            )}
+                                                        </div>
+
+                                                        {/* View/Sign Offer Button */}
+                                                        {app.offer.status === "accepted" ? (
+                                                            <Button
+                                                                size="sm"
+                                                                className="mt-3 bg-green-600 hover:bg-green-700"
+                                                                onClick={() => {
+                                                                    // View offer letter document
+                                                                    window.location.href = `/offer-letter/${app.offer?.offerId}`;
+                                                                }}
+                                                            >
+                                                                <FileText className="w-4 h-4 mr-2" />
+                                                                View Signed Offer
+                                                            </Button>
+                                                        ) : app.offer.signingToken && app.offer.status !== "declined" ? (
+                                                            <Button
+                                                                size="sm"
+                                                                className="mt-3"
+                                                                onClick={() => {
+                                                                    window.location.href = `/offer-signing/${app.offer?.signingToken}`;
+                                                                }}
+                                                            >
+                                                                <Send className="w-4 h-4 mr-2" />
+                                                                Review & Sign Offer
+                                                            </Button>
+                                                        ) : null}
+                                                    </div>
+                                                )}
                                             </div>
-                                            <Badge className={`${getStatusColor(app.status)} text-white capitalize`}>
-                                                {app.status}
+                                            <Badge className={`${getStatusColor(app.status)} text-white`}>
+                                                {getStatusLabel(app.status)}
                                             </Badge>
                                         </div>
                                     </CardContent>
@@ -715,15 +780,31 @@ export default function CandidatePortal() {
                                                             </div>
                                                         </div>
                                                         <div className="flex gap-2">
-                                                            {module.contentUrl && (
-                                                                <Button
-                                                                    variant="outline"
-                                                                    size="sm"
-                                                                    onClick={() => window.open(module.contentUrl, "_blank")}
-                                                                >
-                                                                    <ExternalLink className="w-4 h-4 mr-1" /> Open
-                                                                </Button>
-                                                            )}
+                                                            <Button
+                                                                variant="outline"
+                                                                size="sm"
+                                                                onClick={() => {
+                                                                    if (module.contentUrl) {
+                                                                        window.open(module.contentUrl, "_blank");
+                                                                    } else {
+                                                                        // Generate a placeholder URL based on content type
+                                                                        const placeholders: Record<string, string> = {
+                                                                            video: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                                                                            pdf: "https://www.w3.org/WAI/WCAG21/Techniques/pdf/PDF1.html",
+                                                                            interactive: "https://www.coursera.org/",
+                                                                            article: "https://medium.com/"
+                                                                        };
+                                                                        const url = placeholders[module.contentType] || "https://learn.microsoft.com/";
+                                                                        window.open(url, "_blank");
+                                                                        toast({
+                                                                            title: "📚 Opening Course",
+                                                                            description: `Loading ${module.title}...`
+                                                                        });
+                                                                    }
+                                                                }}
+                                                            >
+                                                                <ExternalLink className="w-4 h-4 mr-1" /> Open
+                                                            </Button>
                                                             {isCompleted ? (
                                                                 <Badge className="bg-green-100 text-green-700">
                                                                     <CheckCircle className="w-3 h-3 mr-1" /> Completed

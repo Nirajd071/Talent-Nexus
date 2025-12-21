@@ -264,6 +264,7 @@ export async function sendOfferLetter(
     startDate: string;
     benefits?: string[];
     expiresAt?: string;
+    signingLink?: string;
   }
 ): Promise<{ success: boolean }> {
   const html = `
@@ -289,6 +290,18 @@ export async function sendOfferLetter(
           ${offerDetails.expiresAt ? `<p style="color: #dc2626;"><strong>Offer Valid Until:</strong> ${offerDetails.expiresAt}</p>` : ""}
         </div>
         
+        ${offerDetails.signingLink ? `
+        <div style="text-align: center; margin: 30px 0;">
+          <p style="color: #4b5563; margin-bottom: 16px;">Ready to accept? Click below to review and sign your offer:</p>
+          <a href="${offerDetails.signingLink}" style="display: inline-block; background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 16px 40px; font-size: 18px; font-weight: bold; text-decoration: none; border-radius: 8px; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);">
+            ✍️ Review & Sign Offer
+          </a>
+          <p style="color: #9ca3af; font-size: 12px; margin-top: 12px;">
+            Or copy this link: ${offerDetails.signingLink}
+          </p>
+        </div>
+        ` : ""}
+        
         <p style="color: #4b5563; margin-top: 24px;">
           Best regards,<br/>
           <strong>The TalentOS Team</strong>
@@ -305,7 +318,7 @@ export async function sendOfferLetter(
     to: candidateEmail,
     subject: `🎉 Job Offer: ${offerDetails.jobTitle} at TalentOS`,
     html,
-    text: `Dear ${candidateName}, Congratulations! We are excited to offer you the ${offerDetails.jobTitle} position. Salary: ${offerDetails.salary}. Start Date: ${offerDetails.startDate}. Best regards, The TalentOS Team`
+    text: `Dear ${candidateName}, Congratulations! We are excited to offer you the ${offerDetails.jobTitle} position. Salary: ${offerDetails.salary}. Start Date: ${offerDetails.startDate}. ${offerDetails.signingLink ? `Sign your offer here: ${offerDetails.signingLink}` : ""} Best regards, The TalentOS Team`
   });
 }
 

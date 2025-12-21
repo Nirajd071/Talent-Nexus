@@ -328,7 +328,7 @@ router.get("/candidate/assigned", async (req: Request, res: Response) => {
             candidateEmail: candidateEmail.toLowerCase(),
             status: { $in: ["assigned", "in_progress"] }
         })
-            .populate("assessmentId")
+            .populate("assessmentId", "title type timeLimit questions description difficulty")
             .sort({ createdAt: -1 })
             .lean();
 
@@ -363,11 +363,12 @@ router.get("/candidate/completed", async (req: Request, res: Response) => {
             return res.status(400).json({ error: "Email required" });
         }
 
+        // Include all terminal statuses - completed, evaluated, terminated
         const completedAssignments = await TestAssignment.find({
             candidateEmail: candidateEmail.toLowerCase(),
-            status: "completed"
+            status: { $in: ["completed", "evaluated", "terminated"] }
         })
-            .populate("assessmentId")
+            .populate("assessmentId", "title type timeLimit questions description difficulty")
             .sort({ completedAt: -1 })
             .lean();
 
@@ -408,19 +409,26 @@ router.post("/candidate/start/:assignmentId", async (req: Request, res: Response
     }
 });
 
-// Submit test
+// Submit test (includes terminated submissions due to cheating)
 router.post("/candidate/submit/:assignmentId", async (req: Request, res: Response) => {
     try {
-        const { answers, timeTaken, proctoringEvents } = req.body;
+        const { answers, timeTaken, proctoringEvents, terminated, terminatedReason, cheatingFlags, penaltyDeduction } = req.body;
         const assignment = await TestAssignment.findById(req.params.assignmentId);
 
         if (!assignment) {
             return res.status(404).json({ error: "Assignment not found" });
         }
 
-        // Update assignment
+        // Update assignment - always set to "completed" even if terminated
         assignment.status = "completed";
         assignment.completedAt = new Date();
+
+        // Store termination info if provided
+        if (terminated) {
+            assignment.terminatedReason = terminatedReason || "cheating_violation";
+            assignment.cheatingFlags = cheatingFlags || 0;
+            assignment.penaltyDeduction = penaltyDeduction || 0;
+        }
 
         // Calculate basic score (AI evaluation will enhance this)
         const assessment = await Assessment.findById(assignment.assessmentId);

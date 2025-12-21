@@ -38,6 +38,7 @@ import TagsPage from "@/pages/tags";
 import CalendarPage from "@/pages/calendar";
 import JobBoardsPage from "@/pages/job-boards";
 import OfferSigning from "@/pages/offer-signing";
+import OfferLetterView from "@/pages/offer-letter-view";
 import LearningReadiness from "@/pages/learning-readiness";
 import ITProvisioning from "@/pages/it-provisioning";
 import AttritionPrediction from "@/pages/attrition-prediction";
@@ -156,6 +157,9 @@ function Router() {
 
             {/* Public offer signing page */}
             <Route path="/offer-signing/:token" component={OfferSigning} />
+
+            {/* Public offer letter view page */}
+            <Route path="/offer-letter/:id" component={OfferLetterView} />
 
             {/* Recruiter/Team Dashboard - protected */}
             <Route path="/dashboard">

@@ -9,4 +9,5 @@ vite.config.ts.*
 .env.local
 .env.*.local
 .venv/
-.env.example
+.env.examplegoogle-cloud-sdk/
+uploads/

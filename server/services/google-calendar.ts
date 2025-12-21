@@ -5,12 +5,18 @@
 
 import { google } from "googleapis";
 
+// Default redirect URI for Calendar OAuth
+const CALENDAR_REDIRECT_URI = process.env.GOOGLE_CALENDAR_REDIRECT_URI ||
+    "http://localhost:5000/api/auth/google/calendar/callback";
+
 // OAuth2 Client Configuration
 const oauth2Client = new google.auth.OAuth2(
     process.env.GOOGLE_CALENDAR_CLIENT_ID,
     process.env.GOOGLE_CALENDAR_CLIENT_SECRET,
-    process.env.GOOGLE_CALENDAR_REDIRECT_URI
+    CALENDAR_REDIRECT_URI
 );
+
+console.log("📅 Google Calendar Redirect URI:", CALENDAR_REDIRECT_URI);
 
 // Calendar API instance
 const calendar = google.calendar({ version: "v3", auth: oauth2Client });

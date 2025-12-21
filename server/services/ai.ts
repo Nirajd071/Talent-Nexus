@@ -111,6 +111,39 @@ const AI_CONFIGS = {
         maxTokens: 1024,
     },
 
+    // OCR/Parsing Agent - llama (new key)
+    ocr: {
+        client: new OpenAI({
+            baseURL: "https://integrate.api.nvidia.com/v1",
+            apiKey: "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",
+        }),
+        model: "meta/llama-3.1-405b-instruct",
+        temperature: 0.2,
+        maxTokens: 2048,
+    },
+
+    // RAG Chatbot - mistral-large-3
+    chatbot: {
+        client: new OpenAI({
+            baseURL: "https://integrate.api.nvidia.com/v1",
+            apiKey: "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",
+        }),
+        model: "mistralai/mistral-large-3-675b-instruct-2512",
+        temperature: 0.15,
+        maxTokens: 2048,
+    },
+
+    // Offer Suggestion - uses fast llama for quick suggestions
+    offerSuggestion: {
+        client: new OpenAI({
+            baseURL: "https://integrate.api.nvidia.com/v1",
+            apiKey: "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",
+        }),
+        model: "meta/llama-3.1-405b-instruct",
+        temperature: 0.3,
+        maxTokens: 512,
+    },
+
     // Fast Kit Generation - nemotron-nano (small, fast model)
     kitGeneration: {
         client: new OpenAI({
@@ -662,6 +695,103 @@ Evaluate this code and provide scores.`;
 }
 
 // ==========================================
+// OFFER SUGGESTION
+// ==========================================
+
+export async function suggestOffer(
+    candidateName: string,
+    skills: string[],
+    experience: string,
+    jobTitle?: string,
+    userId?: string
+): Promise<{
+    role: string;
+    department: string;
+    baseSalary: number;
+    bonus: number;
+    equity: string;
+    startDate: string;
+    expiresAt: string;
+}> {
+    const today = new Date();
+    const startDate = new Date(today);
+    startDate.setDate(startDate.getDate() + 21);
+    const expiresDate = new Date(today);
+    expiresDate.setDate(expiresDate.getDate() + 14);
+
+    const systemPrompt = `You are an HR compensation specialist creating a job offer. Based on the candidate's name and any available information, suggest an appropriate role and compensation.
+
+IMPORTANT: Be creative and match the role to any skills mentioned. If no skills/experience provided, infer from the candidate's name or suggest a VARIED role (not always the same one).
+
+Return ONLY valid JSON:
+{
+    "role": "Specific Job Title matching skills",
+    "department": "Relevant Department",
+    "baseSalary": 120000,
+    "bonus": 15000,
+    "equity": "0.05%"
+}
+
+ROLE OPTIONS (pick one that fits the candidate):
+- Software Engineer, Senior Software Engineer, Staff Engineer
+- Frontend Developer, Backend Developer, Full Stack Developer
+- Product Manager, Senior Product Manager
+- DevOps Engineer, Site Reliability Engineer
+- Data Engineer, Machine Learning Engineer
+- UX Designer, Product Designer
+- Engineering Manager, Technical Lead
+- QA Engineer, Security Engineer
+
+SALARY GUIDELINES (USD annual):
+- Junior (0-2 yrs): $70,000-$95,000
+- Mid (2-5 yrs): $95,000-$140,000
+- Senior (5+ yrs): $140,000-$200,000
+- Principal/Staff: $200,000-$280,000`;
+
+    const userPrompt = `Generate a job offer for candidate:
+Name: ${candidateName}
+${jobTitle ? `Current/Previous Role: ${jobTitle}` : ""}
+${skills.length > 0 ? `Skills: ${skills.slice(0, 15).join(", ")}` : "No skills listed - suggest based on name or pick a varied tech role"}
+${experience ? `Experience: ${experience}` : ""}
+
+Be specific with job title - match to their background if known.`;
+
+    try {
+        const response = await callAI("offerSuggestion", userPrompt, systemPrompt, {
+            resourceType: "offer_suggestion",
+            userId,
+        });
+
+        const jsonMatch = response.content.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) throw new Error("Invalid response");
+
+        const suggestion = JSON.parse(jsonMatch[0]);
+
+        return {
+            role: suggestion.role || "Software Engineer",
+            department: suggestion.department || "Engineering",
+            baseSalary: Math.min(300000, Math.max(50000, parseInt(suggestion.baseSalary) || 100000)),
+            bonus: parseInt(suggestion.bonus) || 10000,
+            equity: suggestion.equity || "0.02%",
+            startDate: startDate.toISOString().split('T')[0],
+            expiresAt: expiresDate.toISOString().split('T')[0]
+        };
+    } catch (error) {
+        console.error("Offer suggestion error:", error);
+        // Return default values
+        return {
+            role: "Software Engineer",
+            department: "Engineering",
+            baseSalary: 120000,
+            bonus: 15000,
+            equity: "0.02%",
+            startDate: startDate.toISOString().split('T')[0],
+            expiresAt: expiresDate.toISOString().split('T')[0]
+        };
+    }
+}
+
+// ==========================================
 // EXPORTS
 // ==========================================
 
@@ -674,5 +804,6 @@ export default {
     generateEmail,
     rankCandidates,
     evaluateCode,
+    suggestOffer,
     callAI,
 };

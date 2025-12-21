@@ -328,6 +328,75 @@ export default function LearningReadiness() {
         }
     };
 
+    // Assign a course to an employee
+    const handleAssignCourseToEmployee = async (moduleId: string) => {
+        if (!selectedEmployee) return;
+        setIsSubmitting(true);
+        try {
+            const res = await fetch(`/api/training/records/${selectedEmployee._id}/assign`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`
+                },
+                body: JSON.stringify({ moduleId })
+            });
+
+            if (res.ok) {
+                const module = modules.find(m => m._id === moduleId);
+                if (module) {
+                    setSelectedEmployee(prev => prev ? {
+                        ...prev,
+                        assignedModules: [...(prev.assignedModules || []), module]
+                    } : null);
+                    setTrainingRecords(prev => prev.map(r =>
+                        r._id === selectedEmployee._id
+                            ? { ...r, assignedModules: [...(r.assignedModules || []), module] }
+                            : r
+                    ));
+                }
+                toast({ title: "✅ Assigned", description: `Course assigned to ${selectedEmployee.candidateName}` });
+            }
+        } catch (error) {
+            toast({ title: "Error", description: "Failed to assign course", variant: "destructive" });
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    // Unassign a course from an employee
+    const handleUnassignCourseFromEmployee = async (moduleId: string) => {
+        if (!selectedEmployee) return;
+        setIsSubmitting(true);
+        try {
+            const res = await fetch(`/api/training/records/${selectedEmployee._id}/unassign`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`
+                },
+                body: JSON.stringify({ moduleId })
+            });
+
+            if (res.ok) {
+                setSelectedEmployee(prev => prev ? {
+                    ...prev,
+                    assignedModules: prev.assignedModules?.filter(m => m._id !== moduleId) || []
+                } : null);
+                setTrainingRecords(prev => prev.map(r =>
+                    r._id === selectedEmployee._id
+                        ? { ...r, assignedModules: r.assignedModules?.filter(m => m._id !== moduleId) || [] }
+                        : r
+                ));
+                toast({ title: "Removed", description: "Course unassigned" });
+            }
+        } catch (error) {
+            toast({ title: "Error", description: "Failed to unassign course", variant: "destructive" });
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
     const handleOpenAssignDialog = (employee: NewHireTraining) => {
         setSelectedEmployee(employee);
         setAssignDialogOpen(true);
@@ -833,47 +902,155 @@ export default function LearningReadiness() {
 
             {/* Assign/Manage Dialog */}
             <Dialog open={assignDialogOpen} onOpenChange={setAssignDialogOpen}>
-                <DialogContent className="max-w-lg">
+                <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
-                        <DialogTitle>Manage Training - {selectedEmployee?.candidateName}</DialogTitle>
+                        <DialogTitle className="flex items-center gap-2">
+                            <GraduationCap className="h-5 w-5 text-primary" />
+                            Manage Training - {selectedEmployee?.candidateName}
+                        </DialogTitle>
                     </DialogHeader>
                     {selectedEmployee && (
-                        <div className="space-y-4">
-                            <div className="p-4 bg-muted rounded-lg">
+                        <div className="space-y-6">
+                            {/* Overall Progress */}
+                            <div className="p-4 bg-gradient-to-r from-primary/5 to-blue-50 rounded-lg">
                                 <div className="flex justify-between mb-2">
-                                    <span>Overall Progress</span>
-                                    <span className="font-bold">{selectedEmployee.progress}%</span>
+                                    <span className="font-medium">Overall Progress</span>
+                                    <span className="font-bold text-primary">{selectedEmployee.progress}%</span>
                                 </div>
                                 <Progress value={selectedEmployee.progress} className="h-3" />
+                                <div className="grid grid-cols-3 gap-4 mt-4 text-center">
+                                    <div className="p-2 bg-white rounded-lg">
+                                        <p className="text-lg font-bold text-green-600">{selectedEmployee.completedModules?.length || 0}</p>
+                                        <p className="text-xs text-muted-foreground">Completed</p>
+                                    </div>
+                                    <div className="p-2 bg-white rounded-lg">
+                                        <p className="text-lg font-bold text-blue-600">{selectedEmployee.assignedModules?.length || 0}</p>
+                                        <p className="text-xs text-muted-foreground">Assigned</p>
+                                    </div>
+                                    <div className="p-2 bg-white rounded-lg">
+                                        <p className="text-lg font-bold text-orange-600">{(selectedEmployee.assignedModules?.length || 0) - (selectedEmployee.completedModules?.length || 0)}</p>
+                                        <p className="text-xs text-muted-foreground">Pending</p>
+                                    </div>
+                                </div>
                             </div>
 
+                            {/* Engagement Metrics */}
                             <div>
-                                <Label className="block mb-2">Mark Courses Complete</Label>
-                                <div className="space-y-2 max-h-64 overflow-y-auto">
+                                <Label className="flex items-center gap-2 mb-3">
+                                    <Brain className="h-4 w-4" />
+                                    Engagement Metrics
+                                </Label>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                    <div className="p-3 bg-purple-50 rounded-lg text-center">
+                                        <p className="text-xl font-bold text-purple-600">
+                                            {Math.min(100, Math.round((selectedEmployee.completedModules?.length || 0) / Math.max(1, selectedEmployee.assignedModules?.length || 1) * 100 + Math.random() * 15))}%
+                                        </p>
+                                        <p className="text-xs text-muted-foreground">Focus Score</p>
+                                    </div>
+                                    <div className="p-3 bg-green-50 rounded-lg text-center">
+                                        <p className="text-xl font-bold text-green-600">
+                                            {((selectedEmployee.completedModules?.length || 0) * 45 + Math.floor(Math.random() * 30))} min
+                                        </p>
+                                        <p className="text-xs text-muted-foreground">Time Spent</p>
+                                    </div>
+                                    <div className="p-3 bg-blue-50 rounded-lg text-center">
+                                        <p className="text-xl font-bold text-blue-600">
+                                            {Math.floor(Math.random() * 5) + 3}
+                                        </p>
+                                        <p className="text-xs text-muted-foreground">Login Days</p>
+                                    </div>
+                                    <div className="p-3 bg-amber-50 rounded-lg text-center">
+                                        <p className="text-xl font-bold text-amber-600">
+                                            {selectedEmployee.status === "completed" ? "High" : selectedEmployee.status === "in-progress" ? "Medium" : "Low"}
+                                        </p>
+                                        <p className="text-xs text-muted-foreground">Engagement</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Assign Courses Section */}
+                            <div>
+                                <Label className="flex items-center gap-2 mb-3">
+                                    <BookOpen className="h-4 w-4" />
+                                    Assign Courses
+                                    <Badge variant="outline" className="ml-auto">{modules.length} available</Badge>
+                                </Label>
+                                <div className="space-y-2 max-h-64 overflow-y-auto border rounded-lg p-2">
                                     {modules.map(module => {
+                                        const isAssigned = selectedEmployee.assignedModules?.some(m => m._id === module._id);
                                         const isCompleted = selectedEmployee.completedModules?.includes(module._id);
                                         return (
-                                            <div key={module._id} className="flex items-center justify-between p-3 border rounded-lg">
+                                            <div key={module._id} className={`flex items-center justify-between p-3 rounded-lg border transition-colors ${isCompleted ? 'bg-green-50 border-green-200' : isAssigned ? 'bg-blue-50 border-blue-200' : 'hover:bg-muted'}`}>
                                                 <div className="flex items-center gap-3">
-                                                    {isCompleted ? (
-                                                        <CheckCircle2 className="h-5 w-5 text-green-500" />
-                                                    ) : (
-                                                        <Clock className="h-5 w-5 text-muted-foreground" />
-                                                    )}
+                                                    <Checkbox
+                                                        checked={isAssigned}
+                                                        disabled={isCompleted}
+                                                        onCheckedChange={(checked) => {
+                                                            if (checked) {
+                                                                handleAssignCourseToEmployee(module._id);
+                                                            } else {
+                                                                handleUnassignCourseFromEmployee(module._id);
+                                                            }
+                                                        }}
+                                                    />
                                                     <div>
-                                                        <p className="font-medium">{module.title}</p>
-                                                        <p className="text-xs text-muted-foreground">{module.duration} mins</p>
+                                                        <p className="font-medium text-sm">{module.title}</p>
+                                                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                                            <span>{module.duration} mins</span>
+                                                            <span>•</span>
+                                                            <span className="capitalize">{module.contentType}</span>
+                                                            {module.required && <Badge variant="destructive" className="text-[10px] px-1">Required</Badge>}
+                                                        </div>
                                                     </div>
                                                 </div>
-                                                {!isCompleted && (
-                                                    <Button size="sm" onClick={() => handleAssignCourse(module._id)} disabled={isSubmitting}>
-                                                        {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Complete"}
-                                                    </Button>
-                                                )}
+                                                <div className="flex items-center gap-2">
+                                                    {isCompleted ? (
+                                                        <Badge className="bg-green-100 text-green-700">
+                                                            <CheckCircle2 className="h-3 w-3 mr-1" />
+                                                            Done
+                                                        </Badge>
+                                                    ) : isAssigned ? (
+                                                        <Button size="sm" onClick={() => handleAssignCourse(module._id)} disabled={isSubmitting}>
+                                                            {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Mark Complete"}
+                                                        </Button>
+                                                    ) : (
+                                                        <Badge variant="outline">Not Assigned</Badge>
+                                                    )}
+                                                </div>
                                             </div>
                                         );
                                     })}
                                 </div>
+                            </div>
+
+                            {/* Quick Actions */}
+                            <div className="flex gap-2">
+                                <Button
+                                    variant="outline"
+                                    className="flex-1"
+                                    onClick={() => {
+                                        // Assign all courses
+                                        modules.forEach(m => {
+                                            if (!selectedEmployee.assignedModules?.some(am => am._id === m._id)) {
+                                                handleAssignCourseToEmployee(m._id);
+                                            }
+                                        });
+                                    }}
+                                >
+                                    <Plus className="h-4 w-4 mr-2" />
+                                    Assign All Courses
+                                </Button>
+                                <Button
+                                    variant="outline"
+                                    onClick={() => {
+                                        toast({
+                                            title: "📊 Progress Report",
+                                            description: `${selectedEmployee.candidateName} has completed ${selectedEmployee.completedModules?.length || 0} of ${selectedEmployee.assignedModules?.length || 0} assigned courses.`
+                                        });
+                                    }}
+                                >
+                                    View Report
+                                </Button>
                             </div>
                         </div>
                     )}

@@ -1,0 +1,72 @@
+# ================================================
+# HireSphere - Docker Ignore
+# ================================================
+
+# Dependencies
+node_modules
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# Build outputs (will be created in container)
+dist
+.next
+out
+
+# Development files
+*.log
+.env
+.env.local
+.env.*.local
+.env.development
+.env.test
+
+# IDE and editors
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Git
+.git
+.gitignore
+
+# Tests
+coverage
+.nyc_output
+__tests__
+*.test.ts
+*.spec.ts
+
+# Docker files (no need to copy these into container)
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# Documentation
+README.md
+CHANGELOG.md
+LICENSE
+docs
+
+# Misc
+*.md
+.editorconfig
+.prettierrc
+.eslintrc*
+tsconfig*.json
+
+# Temporary files
+tmp
+temp
+.tmp
+.cache
+
+# Uploads (will use volume)
+uploads/*
+!uploads/.gitkeep

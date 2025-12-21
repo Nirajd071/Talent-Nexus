@@ -5,24 +5,25 @@
 
 import mongoose from "mongoose";
 
-// Use MongoDB Atlas connection string or local (set MONGODB_URI env var)
-const MONGODB_URI = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/talentos";
-
 let isConnected = false;
 
 // Connect to MongoDB (non-blocking)
 export async function connectDB() {
     if (isConnected) return mongoose.connection;
 
+    // Read MongoDB URI inside function to ensure dotenv has loaded
+    const MONGODB_URI = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/talentos";
+
     try {
         mongoose.set("strictQuery", false);
         await mongoose.connect(MONGODB_URI, {
-            serverSelectionTimeoutMS: 5000, // Fail fast if no DB
+            serverSelectionTimeoutMS: 15000, // Allow more time for Atlas connection
         });
         isConnected = true;
         console.log("✅ MongoDB connected successfully");
         return mongoose.connection;
-    } catch (error) {
+    } catch (error: any) {
+        console.error("❌ MongoDB connection error:", error.message);
         console.warn("⚠️ MongoDB not available - running in demo mode (no persistence)");
         return null;
     }

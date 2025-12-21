@@ -41,7 +41,8 @@ import {
     Sparkles,
     Loader2,
     RotateCcw,
-    Trash2
+    Trash2,
+    Wand2
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -107,6 +108,7 @@ export default function OfferManagement() {
     const [isLoading, setIsLoading] = useState(true);
     const [isSending, setIsSending] = useState<string | null>(null);
     const [isCreating, setIsCreating] = useState(false);
+    const [isAiSuggesting, setIsAiSuggesting] = useState(false);
 
     // Create offer form state
     const [selectedCandidate, setSelectedCandidate] = useState("");
@@ -146,12 +148,22 @@ export default function OfferManagement() {
 
     const fetchCandidates = async () => {
         try {
-            const response = await fetch("/api/candidates", {
+            // Fetch candidates from users collection with role=candidate
+            const response = await fetch("/api/users?role=candidate", {
                 headers: { Authorization: `Bearer ${token}` }
             });
             if (response.ok) {
                 const data = await response.json();
-                setCandidates(data);
+                // Transform user data to candidate format
+                const candidateList = data.map((user: any) => ({
+                    _id: user._id,
+                    name: user.profile?.firstName
+                        ? `${user.profile.firstName} ${user.profile.lastName || ''}`.trim()
+                        : user.email.split('@')[0],
+                    email: user.email,
+                    jobTitle: user.profile?.jobTitle || ''
+                }));
+                setCandidates(candidateList);
             }
         } catch (error) {
             console.error("Failed to fetch candidates:", error);
@@ -222,6 +234,56 @@ export default function OfferManagement() {
             toast({ title: "Error", description: "Failed to create offer.", variant: "destructive" });
         } finally {
             setIsCreating(false);
+        }
+    };
+
+    // AI Suggest offer details based on candidate
+    const handleAiSuggest = async () => {
+        if (!selectedCandidate) {
+            toast({ title: "Select Candidate First", description: "Please select a candidate before using AI suggest.", variant: "destructive" });
+            return;
+        }
+
+        const candidate = candidates.find(c => c._id === selectedCandidate);
+        if (!candidate) return;
+
+        setIsAiSuggesting(true);
+        try {
+            const response = await fetch("/api/ai/suggest-offer", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    candidateName: candidate.name,
+                    candidateEmail: candidate.email,
+                    candidateJobTitle: candidate.jobTitle || ""
+                })
+            });
+
+            const suggestion = await response.json();
+            console.log("AI suggestion response:", suggestion);
+
+            if (response.ok && suggestion) {
+                // Apply AI suggestions to form
+                setOfferRole(suggestion.role || "Software Engineer");
+                setOfferDepartment(suggestion.department || "Engineering");
+                setSalaryValue([Math.min(300000, Math.max(50000, suggestion.baseSalary || 120000))]);
+                setBonusValue((suggestion.bonus || 15000).toString());
+                setEquityValue(suggestion.equity || "0.02%");
+                if (suggestion.startDate) setStartDate(suggestion.startDate);
+                if (suggestion.expiresAt) setExpiresAt(suggestion.expiresAt);
+
+                toast({ title: "AI Suggestion Applied! ✨", description: "Review and adjust the values as needed." });
+            } else {
+                throw new Error(suggestion?.error || "AI suggestion failed");
+            }
+        } catch (error: any) {
+            console.error("AI suggest error:", error);
+            toast({ title: "AI Suggestion Failed", description: error.message || "Could not generate suggestions. Please fill manually.", variant: "destructive" });
+        } finally {
+            setIsAiSuggesting(false);
         }
     };
 
@@ -493,6 +555,24 @@ export default function OfferManagement() {
                                     Generate an offer letter with compensation details.
                                 </DialogDescription>
                             </DialogHeader>
+
+                            {/* AI Suggest Button */}
+                            <div className="flex justify-end">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="gap-2 bg-gradient-to-r from-purple-50 to-blue-50 border-purple-200 text-purple-700 hover:from-purple-100 hover:to-blue-100"
+                                    onClick={handleAiSuggest}
+                                    disabled={isAiSuggesting || !selectedCandidate}
+                                >
+                                    {isAiSuggesting ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                        <Wand2 className="h-4 w-4" />
+                                    )}
+                                    {isAiSuggesting ? "Generating..." : "AI Suggest"}
+                                </Button>
+                            </div>
 
                             <div className="grid gap-6 py-4">
                                 <div className="grid grid-cols-2 gap-4">
